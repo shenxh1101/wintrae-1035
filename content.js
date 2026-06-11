@@ -125,8 +125,7 @@ const LogisticsExtractor = {
       }
     }
 
-    const uniqueWaybills = this.deduplicateWaybills(waybills);
-    return uniqueWaybills.map(w => ({
+    return waybills.map(w => ({
       ...w,
       carrier: this.mapCarrierToId(w.carrier),
       extractedAt: new Date().toISOString()
@@ -251,10 +250,52 @@ const LogisticsExtractor = {
   highlightExceptions(exceptions) {
     this.clearHighlights();
 
+    const seenText = new Map();
     exceptions.forEach(exception => {
       const waybillNum = exception.waybillNumber;
-      this.highlightText(waybillNum, exception);
+      if (!seenText.has(waybillNum)) {
+        seenText.set(waybillNum, exception);
+      }
     });
+
+    seenText.forEach((exception, text) => {
+      this.highlightText(text, exception);
+    });
+  },
+
+  getExceptionIcon(type) {
+    const icons = {
+      address_incomplete: '📍',
+      address_too_long: '📍',
+      out_of_area: '🚫',
+      overweight: '⚖️',
+      weight_warning: '⚖️',
+      duplicate: '🔁',
+      time_critical: '⏰'
+    };
+    return icons[type] || '⚠️';
+  },
+
+  getSeverityLabel(severity) {
+    const labels = {
+      high: '高风险',
+      medium: '中风险',
+      low: '低风险'
+    };
+    return labels[severity] || '异常';
+  },
+
+  getTypeLabel(type) {
+    const labels = {
+      address_incomplete: '地址不完整',
+      address_too_long: '地址过长',
+      out_of_area: '超区件',
+      overweight: '超重',
+      weight_warning: '重量警告',
+      duplicate: '重复运单',
+      time_critical: '时效紧急'
+    };
+    return labels[type] || type;
   },
 
   highlightText(text, exception) {
@@ -276,9 +317,25 @@ const LogisticsExtractor = {
       nodes.push(walker.currentNode);
     }
 
+    const severity = exception.severity || 'medium';
+    const severityLabel = this.getSeverityLabel(severity);
+    const exceptionDetails = exception.exceptions.map(e => {
+      return `${this.getExceptionIcon(e.type)} ${this.getTypeLabel(e.type)}: ${e.message}`;
+    }).join('\n');
+    const suggestions = exception.exceptions.map(e => {
+      return `💡 ${e.suggestion}`;
+    }).join('\n');
+
+    const tooltipText = `【${severityLabel}】运单号: ${text}\n───────────────\n${exceptionDetails}\n───────────────\n处理建议:\n${suggestions}`;
+
+    const uniqueClass = 'hl-' + Math.random().toString(36).substr(2, 9);
+
     nodes.forEach(node => {
-      const index = node.nodeValue.indexOf(text);
-      if (index >= 0) {
+      let searchFrom = 0;
+      while (searchFrom < node.nodeValue.length) {
+        const index = node.nodeValue.indexOf(text, searchFrom);
+        if (index < 0) break;
+
         const before = node.nodeValue.substring(0, index);
         const matched = node.nodeValue.substring(index, index + text.length);
         const after = node.nodeValue.substring(index + text.length);
@@ -289,28 +346,93 @@ const LogisticsExtractor = {
           parent.insertBefore(document.createTextNode(before), node);
         }
 
+        const wrapper = document.createElement('span');
+        wrapper.className = `logistics-highlight-wrapper ${uniqueClass}`;
+        wrapper.style.position = 'relative';
+        wrapper.style.display = 'inline-block';
+
         const highlight = document.createElement('span');
-        highlight.className = 'logistics-highlight logistics-highlight-' + exception.severity;
+        highlight.className = `logistics-highlight logistics-highlight-${severity}`;
         highlight.textContent = matched;
-        highlight.title = `异常: ${exception.exceptions.map(e => e.message).join('; ')}\n建议: ${exception.exceptions.map(e => e.suggestion).join('; ')}`;
-        parent.insertBefore(highlight, node);
+        highlight.title = tooltipText;
+
+        const badge = document.createElement('span');
+        badge.className = `logistics-badge logistics-badge-${severity}`;
+        const icons = exception.exceptions.slice(0, 2).map(e => this.getExceptionIcon(e.type));
+        badge.textContent = icons.join('');
+        badge.title = tooltipText;
+
+        wrapper.appendChild(highlight);
+        wrapper.appendChild(badge);
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'logistics-tooltip logistics-tooltip-' + severity;
+        tooltip.innerHTML = `
+          <div class="tooltip-title">
+            <span class="tooltip-severity tooltip-severity-${severity}">${severityLabel}</span>
+            <span class="tooltip-waybill">运单: ${text}</span>
+          </div>
+          <div class="tooltip-body">
+            ${exception.exceptions.map(e => `
+              <div class="tooltip-exception">
+                <div class="tooltip-exception-title">
+                  <span class="tooltip-icon">${this.getExceptionIcon(e.type)}</span>
+                  <span>${this.getTypeLabel(e.type)}</span>
+                </div>
+                <div class="tooltip-exception-message">${e.message}</div>
+                <div class="tooltip-exception-suggestion">💡 ${e.suggestion}</div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+
+        wrapper.appendChild(tooltip);
+        wrapper.addEventListener('mouseenter', () => {
+          tooltip.style.display = 'block';
+          const rect = wrapper.getBoundingClientRect();
+          const tooltipWidth = tooltip.offsetWidth || 320;
+          let left = 0;
+          if (rect.left + tooltipWidth > window.innerWidth) {
+            left = -(tooltipWidth - rect.width);
+          }
+          tooltip.style.left = left + 'px';
+          tooltip.style.top = (rect.height + 6) + 'px';
+        });
+        wrapper.addEventListener('mouseleave', () => {
+          tooltip.style.display = 'none';
+        });
+
+        parent.insertBefore(wrapper, node);
 
         if (after) {
           parent.insertBefore(document.createTextNode(after), node);
         }
 
         parent.removeChild(node);
+
+        searchFrom = 0;
+        break;
       }
     });
   },
 
   clearHighlights() {
+    document.querySelectorAll('.logistics-highlight-wrapper').forEach(wrapper => {
+      const parent = wrapper.parentNode;
+      const highlight = wrapper.querySelector('.logistics-highlight');
+      if (highlight) {
+        const text = document.createTextNode(highlight.textContent);
+        parent.replaceChild(text, wrapper);
+      }
+    });
     document.querySelectorAll('.logistics-highlight').forEach(el => {
       const parent = el.parentNode;
       const text = document.createTextNode(el.textContent);
       parent.replaceChild(text, el);
-      parent.normalize();
     });
+    if (document.body) {
+      document.body.normalize();
+    }
   },
 
   createFloatButton() {

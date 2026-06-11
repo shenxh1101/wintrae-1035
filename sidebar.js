@@ -21,10 +21,11 @@ const SidebarApp = {
 
   async loadInitialData() {
     try {
-      const [settingsRes, templatesRes, waybillsRes] = await Promise.all([
+      const [settingsRes, templatesRes, waybillsRes, workOrdersRes] = await Promise.all([
         this.sendMessage({ action: 'getSettings' }),
         this.sendMessage({ action: 'getTemplates' }),
-        this.sendMessage({ action: 'getWaybillData' })
+        this.sendMessage({ action: 'getWaybillData' }),
+        this.sendMessage({ action: 'getWorkOrders' })
       ]);
 
       if (settingsRes.success) {
@@ -41,6 +42,25 @@ const SidebarApp = {
       if (waybillsRes.success) {
         this.state.waybills = waybillsRes.data;
         this.renderWaybillList();
+        this.updateStats();
+      }
+
+      if (workOrdersRes.success && workOrdersRes.data.length > 0) {
+        this.state.workOrders = workOrdersRes.data;
+        if (this.state.workOrders.length > 0) {
+          this.state.exceptions = this.state.workOrders.map(wo => ({
+            _id: wo._id,
+            _index: wo._index,
+            waybillNumber: wo.waybillNumber,
+            address: wo.address,
+            weight: wo.weight,
+            carrier: wo.carrier,
+            timeRequirement: wo.timeRequirement,
+            severity: wo.severity,
+            exceptions: wo.exceptions
+          })).filter(Boolean);
+        }
+        this.renderWorkOrders();
         this.updateStats();
       }
     } catch (error) {
@@ -137,10 +157,13 @@ const SidebarApp = {
   },
 
   async clearWaybills() {
-    if (!confirm('确定要清空所有运单数据吗？')) return;
+    if (!confirm('确定要清空所有运单数据和工单吗？')) return;
 
     try {
-      await this.sendMessage({ action: 'clearWaybillData' });
+      await Promise.all([
+        this.sendMessage({ action: 'clearWaybillData' }),
+        this.sendMessage({ action: 'clearWorkOrders' })
+      ]);
       this.state.waybills = [];
       this.state.exceptions = [];
       this.state.costEstimates = [];
@@ -172,7 +195,7 @@ const SidebarApp = {
 
       if (response.success) {
         this.state.exceptions = response.data;
-        this.generateWorkOrders();
+        await this.generateWorkOrders();
         this.renderWaybillList();
         this.updateStats();
         this.switchTab('exception');
@@ -195,15 +218,24 @@ const SidebarApp = {
     }
   },
 
-  generateWorkOrders() {
+  async generateWorkOrders() {
+    const existingMap = new Map(
+      this.state.workOrders.map(w => [w._id || w.waybillNumber, w])
+    );
+
     this.state.workOrders = this.state.exceptions.map(exception => {
-      const existing = this.state.workOrders.find(w => w.waybillNumber === exception.waybillNumber);
+      const key = exception._id || exception.waybillNumber;
+      const existing = existingMap.get(key);
       return {
-        id: 'wo-' + exception.waybillNumber,
+        id: 'wo-' + (exception._id || exception.waybillNumber),
+        _id: exception._id,
+        _index: exception._index,
         waybillNumber: exception.waybillNumber,
         address: exception.address,
         weight: exception.weight,
         carrier: exception.carrier,
+        timeRequirement: exception.timeRequirement,
+        severity: exception.severity,
         exceptions: exception.exceptions,
         status: existing?.status || 'pending',
         remark: existing?.remark || '',
@@ -211,6 +243,16 @@ const SidebarApp = {
         updatedAt: new Date().toISOString()
       };
     });
+
+    try {
+      await this.sendMessage({
+        action: 'saveWorkOrders',
+        data: this.state.workOrders
+      });
+    } catch (e) {
+      console.warn('保存工单失败:', e);
+    }
+
     this.renderWorkOrders();
   },
 
@@ -259,28 +301,124 @@ const SidebarApp = {
     });
 
     const cityList = Object.entries(cities);
+    const mainCityList = cityList.filter(([c]) => c !== '未知');
     const positions = this.generateCityPositions(cityList.length);
 
-    let mapHTML = '<div class="map-content">';
+    let riskTips = [];
+    const totalOrders = mainCityList.reduce((s, [, ws]) => s + ws.length, 0);
+    const unknownCount = waybills.length - totalOrders;
+
+    if (mainCityList.length >= 3) {
+      const dispersion = Math.round((1 - (Math.max(...mainCityList.map(([, ws]) => ws.length)) / (totalOrders || 1))) * 100);
+      riskTips.push({
+        type: 'high',
+        icon: '⚠️',
+        text: `绕路风险：${mainCityList.length}个城市分布，分散度${dispersion}%，建议分批次配送`
+      });
+    } else if (mainCityList.length === 2) {
+      riskTips.push({
+        type: 'medium',
+        icon: '🔄',
+        text: `跨城市配送：${mainCityList.map(c => c[0]).join(' → ')}，建议按城市分车或优化装车顺序`
+      });
+    }
+
+    if (unknownCount > 0) {
+      riskTips.push({
+        type: 'medium',
+        icon: '❓',
+        text: `${unknownCount}个订单地址未识别城市，请补充完整信息`
+      });
+    }
+
+    mainCityList.forEach(([city, cityWaybills]) => {
+      if (cityWaybills.length >= 2) {
+        riskTips.push({
+          type: 'low',
+          icon: '✅',
+          text: `${city}有${cityWaybills.length}个订单，可安排同车配送`
+        });
+      }
+    });
+
+    let mapHTML = '<div class="map-content" style="position: relative;">';
+
+    if (mainCityList.length >= 2) {
+      let linesHTML = '<svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;">';
+      for (let i = 0; i < mainCityList.length; i++) {
+        for (let j = i + 1; j < mainCityList.length; j++) {
+          const iIdx = cityList.findIndex(([c]) => c === mainCityList[i][0]);
+          const jIdx = cityList.findIndex(([c]) => c === mainCityList[j][0]);
+          if (iIdx >= 0 && jIdx >= 0) {
+            const p1 = positions[iIdx];
+            const p2 = positions[jIdx];
+            const count1 = mainCityList[i][1].length;
+            const count2 = mainCityList[j][1].length;
+            const lineOpacity = Math.min(0.1 + (count1 + count2) / 20, 0.4);
+            const isDetour = mainCityList.length >= 3;
+            linesHTML += `<line x1="${p1.x}%" y1="${p1.y}%" x2="${p2.x}%" y2="${p2.y}%" 
+                                   stroke="${isDetour ? '#ef4444' : '#f59e0b'}" 
+                                   stroke-width="${isDetour ? 2 : 1.5}" 
+                                   stroke-dasharray="${isDetour ? '4,4' : '2,3'}" 
+                                   opacity="${lineOpacity}" />`;
+          }
+        }
+      }
+      linesHTML += '</svg>';
+      mapHTML += linesHTML;
+    }
+
     cityList.forEach(([city, cityWaybills], index) => {
       const pos = positions[index];
       const count = cityWaybills.length;
+      const isUnknown = city === '未知';
+      const isCluster = count >= 3;
       mapHTML += `
-        <div class="map-marker ${count >= 3 ? 'cluster' : ''}"
-             style="left: ${pos.x}%; top: ${pos.y}%;"
+        <div class="map-marker ${isCluster ? 'cluster' : ''} ${isUnknown ? 'unknown' : ''}"
+             style="left: ${pos.x}%; top: ${pos.y}%; z-index: 2;"
              title="${city}: ${count}个订单">
           ${count}
+          <span style="position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;
+                       font-size:10.5px;padding:2px 7px;background:rgba(0,0,0,0.78);color:white;border-radius:4px;
+                       font-weight:500;pointer-events:none;">
+            ${city}
+          </span>
         </div>
       `;
     });
     mapHTML += '</div>';
 
+    if (mainCityList.length >= 2) {
+      mapHTML += `
+        <div style="margin-top: 10px; display:flex; flex-wrap:wrap; gap:10px; font-size:10.5px; color:#6b7280; padding: 6px 8px; background: #f9fafb; border-radius: 6px;">
+          <span><span style="display:inline-block;width:24px;border-top:2px dashed #f59e0b;vertical-align:middle;margin-right:5px;"></span>跨城市 (双城市)</span>
+          <span><span style="display:inline-block;width:24px;border-top:2px dashed #ef4444;vertical-align:middle;margin-right:5px;"></span>绕路风险 (多城市)</span>
+        </div>
+      `;
+    }
+
+    if (riskTips.length > 0) {
+      mapHTML += `
+        <div style="margin-top: 14px;">
+          <h4 style="font-size: 13px; margin-bottom: 8px; color: #374151;">路线风险提示</h4>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            ${riskTips.map(tip => `
+              <div class="route-risk-tip route-risk-${tip.type}">
+                <span class="route-risk-icon">${tip.icon}</span>
+                <span class="route-risk-text">${tip.text}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
     mapHTML += `
       <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #f3f4f6;">
-        <h4 style="font-size: 13px; margin-bottom: 8px; color: #374151;">配送区域分布</h4>
+        <h4 style="font-size: 13px; margin-bottom: 8px; color: #374151;">配送区域分布 (共${waybills.length}单)</h4>
         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
           ${cityList.map(([city, cityWaybills]) => `
-            <span style="padding: 4px 10px; background: #eff6ff; color: #2563eb; border-radius: 20px; font-size: 11px;">
+            <span class="city-badge city-badge-${city === '未知' ? 'unknown' : (cityWaybills.length >= 3 ? 'cluster' : 'normal')}">
               ${city} (${cityWaybills.length})
             </span>
           `).join('')}
@@ -420,35 +558,53 @@ const SidebarApp = {
       return;
     }
 
-    const exceptionMap = new Map(
-      this.state.workOrders.map(w => [w.waybillNumber, w])
-    );
+    const workOrderMap = new Map();
+    this.state.workOrders.forEach(w => {
+      const key = w._id || w.waybillNumber;
+      workOrderMap.set(key, w);
+    });
 
-    const records = this.state.waybills.map(w => {
-      const workOrder = exceptionMap.get(w.waybillNumber);
-      const carrier = this.state.settings.carriers.find(c => c.id === w.carrier);
+    const records = this.state.waybills.map((w, idx) => {
+      const woKey = w._id || w.waybillNumber;
+      let workOrder = workOrderMap.get(woKey);
+      if (!workOrder) {
+        workOrder = this.state.workOrders.find(wo => wo.waybillNumber === w.waybillNumber);
+      }
+
+      const carrier = this.state.settings?.carriers?.find(c => c.id === w.carrier);
+      const exceptions = workOrder?.exceptions || [];
+
+      const status = workOrder?.status || '未标记';
+      const remark = workOrder?.remark || w.remark || '';
+      const updatedAt = workOrder?.updatedAt || w.updatedAt || new Date().toISOString();
 
       return {
+        index: idx + 1,
         waybillNumber: w.waybillNumber,
         address: w.address,
         weight: w.weight,
-        carrierName: carrier?.name || w.carrier,
-        timeRequirement: w.timeRequirement,
-        exceptionTypes: workOrder?.exceptions.map(e => e.type) || [],
-        messages: workOrder?.exceptions.map(e => e.message) || [],
-        suggestions: workOrder?.exceptions.map(e => e.suggestion) || [],
-        remark: workOrder?.remark || ''
+        carrierName: carrier?.name || w.carrier || '未指定',
+        timeRequirement: w.timeRequirement || '',
+        exceptionTypes: exceptions.map(e => this.getSeverityLabel(e.type)),
+        messages: exceptions.map(e => e.message),
+        suggestions: exceptions.map(e => e.suggestion),
+        status: status,
+        remark: remark,
+        updatedAt: updatedAt
       };
-    }).filter(r => r.exceptionTypes.length > 0 || this.state.exceptionFilter === 'all');
+    }).filter(r => {
+      if (this.state.exceptionFilter === 'all') return true;
+      return r.exceptionTypes.length > 0;
+    });
 
-    const format = confirm('点击"确定"导出CSV格式，点击"取消"导出JSON格式') ? 'csv' : 'json';
+    const format = confirm('点击"确定"导出CSV格式（可Excel打开）\n点击"取消"导出JSON格式') ? 'csv' : 'json';
 
     try {
       await this.sendMessage({
         action: 'exportData',
         data: { records, format }
       });
-      this.showToast(`数据已导出为 ${format.toUpperCase()} 格式`, 'success');
+      this.showToast(`已导出 ${records.length} 条记录（${format.toUpperCase()}格式）`, 'success');
     } catch (error) {
       console.error('导出失败:', error);
       this.showToast('导出失败', 'error');
@@ -583,7 +739,7 @@ const SidebarApp = {
     }
   },
 
-  saveRemark() {
+  async saveRemark() {
     if (!this.state.selectedWaybill) return;
 
     const remarkInput = document.querySelector('.remark-input');
@@ -596,7 +752,6 @@ const SidebarApp = {
     if (workOrder) {
       workOrder.remark = remark;
       workOrder.updatedAt = new Date().toISOString();
-      this.renderWorkOrders();
     }
 
     const waybill = this.state.waybills.find(
@@ -604,21 +759,44 @@ const SidebarApp = {
     );
     if (waybill) {
       waybill.remark = remark;
-      this.sendMessage({
-        action: 'saveWaybillData',
-        data: this.state.waybills
-      });
     }
 
+    try {
+      await Promise.all([
+        this.sendMessage({
+          action: 'saveWorkOrders',
+          data: this.state.workOrders
+        }),
+        this.sendMessage({
+          action: 'saveWaybillData',
+          data: this.state.waybills
+        })
+      ]);
+    } catch (e) {
+      console.warn('保存失败:', e);
+    }
+
+    this.renderWorkOrders();
+    this.renderWaybillList();
     this.closeModal('detailModal');
     this.showToast('备注保存成功', 'success');
   },
 
-  updateWorkOrderStatus(waybillNumber, status) {
+  async updateWorkOrderStatus(waybillNumber, status) {
     const workOrder = this.state.workOrders.find(w => w.waybillNumber === waybillNumber);
     if (workOrder) {
       workOrder.status = status;
       workOrder.updatedAt = new Date().toISOString();
+
+      try {
+        await this.sendMessage({
+          action: 'saveWorkOrders',
+          data: this.state.workOrders
+        });
+      } catch (e) {
+        console.warn('保存工单失败:', e);
+      }
+
       this.renderWorkOrders();
       this.updateStats();
       this.showToast(`状态已更新为：${this.getStatusLabel(status)}`, 'success');
@@ -679,12 +857,30 @@ const SidebarApp = {
       return;
     }
 
-    const exceptionMap = new Map(
-      this.state.exceptions.map(e => [e.waybillNumber, e])
+    const waybillNumberCount = {};
+    this.state.waybills.forEach(w => {
+      waybillNumberCount[w.waybillNumber] = (waybillNumberCount[w.waybillNumber] || 0) + 1;
+    });
+
+    const exceptionMap = new Map();
+    this.state.exceptions.forEach(e => {
+      const key = e._id || e.waybillNumber;
+      exceptionMap.set(key, e);
+    });
+
+    const workOrderMap = new Map(
+      this.state.workOrders.map(w => [w._id || w.waybillNumber, w])
     );
 
-    container.innerHTML = waybills.map(waybill => {
-      const exception = exceptionMap.get(waybill.waybillNumber);
+    container.innerHTML = waybills.map((waybill, idx) => {
+      const displayIdx = this.state.waybills.indexOf(waybill) + 1;
+      const isDuplicate = waybillNumberCount[waybill.waybillNumber] > 1;
+      const exceptionKey = waybill._id || waybill.waybillNumber;
+      const exception = exceptionMap.get(exceptionKey) ||
+                        this.state.exceptions.find(e => e.waybillNumber === waybill.waybillNumber);
+      const workOrder = workOrderMap.get(exceptionKey) ||
+                        this.state.workOrders.find(w => w.waybillNumber === waybill.waybillNumber);
+
       let severity = 'normal';
       let exceptionTags = '';
 
@@ -697,18 +893,32 @@ const SidebarApp = {
         exceptionTags = `
           <div class="exception-tags">
             ${exception.exceptions.map(e => `
-              <span class="exception-tag">${this.getSeverityLabel(e.type)}</span>
+              <span class="exception-tag tag-${e.type}">${this.getSeverityLabel(e.type)}</span>
             `).join('')}
+          </div>
+        `;
+      } else if (isDuplicate) {
+        severity = 'high';
+        exceptionTags = `
+          <div class="exception-tags">
+            <span class="exception-tag tag-duplicate">🔁 重复运单</span>
           </div>
         `;
       }
 
       const carrier = this.state.settings?.carriers.find(c => c.id === waybill.carrier);
+      const duplicateBadge = isDuplicate ? `<span class="duplicate-badge">🔁 重复×${waybillNumberCount[waybill.waybillNumber]}</span>` : '';
+      const statusBadge = workOrder ? `<span class="status-mini status-${workOrder.status}">${this.getStatusLabel(workOrder.status)}</span>` : '';
 
       return `
-        <div class="waybill-card severity-${severity}" data-waybill="${waybill.waybillNumber}">
+        <div class="waybill-card severity-${severity}" data-waybill="${waybill.waybillNumber}" data-id="${waybill._id || ''}">
           <div class="waybill-header">
-            <span class="waybill-number">${waybill.waybillNumber}</span>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span class="waybill-index">#${displayIdx}</span>
+              <span class="waybill-number">${waybill.waybillNumber}</span>
+              ${duplicateBadge}
+              ${statusBadge}
+            </div>
             <span class="severity-badge severity-${severity}">
               ${severity === 'normal' ? '正常' : severity === 'high' ? '高风险' : severity === 'medium' ? '中风险' : '低风险'}
             </span>
@@ -730,6 +940,12 @@ const SidebarApp = {
             <div class="waybill-detail-row">
               <span class="waybill-detail-label">时效:</span>
               <span class="waybill-detail-value">${waybill.timeRequirement}</span>
+            </div>
+            ` : ''}
+            ${(workOrder?.remark || waybill.remark) ? `
+            <div class="waybill-detail-row">
+              <span class="waybill-detail-label">备注:</span>
+              <span class="waybill-detail-value remark-text">${workOrder?.remark || waybill.remark}</span>
             </div>
             ` : ''}
           </div>
@@ -866,8 +1082,42 @@ const SidebarApp = {
     }
 
     container.innerHTML = this.state.routeAnalysis.map(analysis => {
-      const cardClass = analysis.type === 'merge_opportunity' ? 'merge' :
-                        analysis.type === 'multiple_cities' ? 'warning' : '';
+      let cardClass = '';
+      let iconText = '📍';
+      let titleText = '路线分析';
+
+      switch (analysis.type) {
+        case 'detour_risk':
+          cardClass = 'danger';
+          iconText = '⚠️';
+          titleText = '绕路风险';
+          break;
+        case 'cross_city_dispatch':
+          cardClass = 'warning';
+          iconText = '🔄';
+          titleText = '跨城市配送';
+          break;
+        case 'multiple_cities':
+          cardClass = 'warning';
+          iconText = '🗺️';
+          titleText = '多城市分布';
+          break;
+        case 'inner_city_detour':
+          cardClass = 'warning';
+          iconText = '🏙️';
+          titleText = '城内区域分散';
+          break;
+        case 'merge_opportunity':
+          cardClass = 'merge';
+          iconText = '✅';
+          titleText = '合单机会';
+          break;
+        case 'unknown_area':
+          cardClass = 'warning';
+          iconText = '❓';
+          titleText = '地址不完整';
+          break;
+      }
 
       let waybillsHTML = '';
       if (analysis.waybills && analysis.waybills.length > 0) {
@@ -881,18 +1131,24 @@ const SidebarApp = {
         `;
       }
 
+      const severityDot = `<span class="route-severity route-severity-${analysis.severity || 'low'}"></span>`;
+
+      const subTitle = analysis.area ? `${analysis.city || ''} ${analysis.area}` :
+                        analysis.cities ? analysis.cities.join('、') :
+                        analysis.city ? analysis.city : '';
+
       return `
         <div class="route-card ${cardClass}">
           <div class="route-header">
             <span class="route-title">
-              ${analysis.type === 'merge_opportunity' ? '合单机会' :
-                analysis.type === 'multiple_cities' ? '多城市分布' : '路线分析'}
-              ${analysis.area ? ` - ${analysis.area}` : ''}
+              ${iconText} ${titleText}
+              ${subTitle ? `<span class="route-subtitle">— ${subTitle}</span>` : ''}
+              ${severityDot}
             </span>
-            <span class="route-count">${analysis.count} 单</span>
+            <span class="route-count">${analysis.count || 0} 单</span>
           </div>
           <p class="route-message">${analysis.message}</p>
-          <p class="route-suggestion">${analysis.suggestion}</p>
+          <p class="route-suggestion">💡 ${analysis.suggestion}</p>
           ${waybillsHTML}
         </div>
       `;

@@ -1,6 +1,7 @@
 const LOGISTICS_SETTINGS_KEY = 'logistics_settings';
 const EXCEPTION_TEMPLATES_KEY = 'exception_templates';
 const WAYBILL_DATA_KEY = 'waybill_data';
+const WORK_ORDERS_KEY = 'work_orders';
 
 const defaultSettings = {
   carriers: [
@@ -98,6 +99,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'clearWaybillData':
       handleClearWaybillData(sendResponse);
       return true;
+    case 'saveWorkOrders':
+      handleSaveWorkOrders(request.data, sendResponse);
+      return true;
+    case 'getWorkOrders':
+      handleGetWorkOrders(sendResponse);
+      return true;
+    case 'clearWorkOrders':
+      handleClearWorkOrders(sendResponse);
+      return true;
     case 'checkExceptions':
       handleCheckExceptions(request.data, sendResponse);
       return true;
@@ -156,9 +166,14 @@ async function handleDeleteTemplate(id, sendResponse) {
 async function handleSaveWaybillData(data, sendResponse) {
   const result = await chrome.storage.local.get(WAYBILL_DATA_KEY);
   const existing = result[WAYBILL_DATA_KEY] || [];
-  const existingMap = new Map(existing.map(w => [w.waybillNumber, w]));
-  data.forEach(w => existingMap.set(w.waybillNumber, { ...existingMap.get(w.waybillNumber), ...w, updatedAt: new Date().toISOString() }));
-  const merged = Array.from(existingMap.values());
+  const merged = [
+    ...existing,
+    ...data.map(w => ({
+      ...w,
+      _id: w._id || ('wb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)),
+      updatedAt: new Date().toISOString()
+    }))
+  ];
   await chrome.storage.local.set({ [WAYBILL_DATA_KEY]: merged });
   sendResponse({ success: true, data: merged });
 }
@@ -173,11 +188,34 @@ async function handleClearWaybillData(sendResponse) {
   sendResponse({ success: true });
 }
 
+async function handleSaveWorkOrders(data, sendResponse) {
+  await chrome.storage.local.set({ [WORK_ORDERS_KEY]: data });
+  sendResponse({ success: true, data: data });
+}
+
+async function handleGetWorkOrders(sendResponse) {
+  const result = await chrome.storage.local.get(WORK_ORDERS_KEY);
+  sendResponse({ success: true, data: result[WORK_ORDERS_KEY] || [] });
+}
+
+async function handleClearWorkOrders(sendResponse) {
+  await chrome.storage.local.remove(WORK_ORDERS_KEY);
+  sendResponse({ success: true });
+}
+
 function handleCheckExceptions(data, sendResponse) {
   const { waybills, settings } = data;
   const exceptions = [];
+  const waybillNumberMap = {};
 
-  waybills.forEach(waybill => {
+  waybills.forEach((w, idx) => {
+    if (!waybillNumberMap[w.waybillNumber]) {
+      waybillNumberMap[w.waybillNumber] = [];
+    }
+    waybillNumberMap[w.waybillNumber].push(idx);
+  });
+
+  waybills.forEach((waybill, idx) => {
     const waybillExceptions = [];
 
     if (!waybill.address || waybill.address.length < settings.minAddressLength) {
@@ -185,14 +223,14 @@ function handleCheckExceptions(data, sendResponse) {
         type: 'address_incomplete',
         severity: 'high',
         message: '地址信息不完整',
-        suggestion: '请补充详细的收件地址'
+        suggestion: '请补充详细的收件地址（需包含省、市、区、街道及门牌号）'
       });
     } else if (waybill.address.length > settings.maxAddressLength) {
       waybillExceptions.push({
         type: 'address_too_long',
         severity: 'medium',
         message: '地址信息过长',
-        suggestion: '请精简地址描述'
+        suggestion: '请精简地址描述，去除不必要的修饰词'
       });
     }
 
@@ -208,8 +246,8 @@ function handleCheckExceptions(data, sendResponse) {
           waybillExceptions.push({
             type: 'out_of_area',
             severity: 'high',
-            message: '地址超出承运商派送范围',
-            suggestion: `建议更换承运商，${carrier.name}暂不支持该地区派送`
+            message: `超区件：${carrier.name}不派送此地区`,
+            suggestion: `建议更换承运商（推荐中通/圆通），或联系客户确认是否自提`
           });
         }
       }
@@ -221,15 +259,15 @@ function handleCheckExceptions(data, sendResponse) {
         waybillExceptions.push({
           type: 'overweight',
           severity: 'high',
-          message: `包裹超重（${waybill.weight}kg）`,
-          suggestion: `${carrier.name}限重${carrier.weightLimit}kg，建议拆分或更换承运商`
+          message: `超重：${waybill.weight}kg（${carrier.name}限重${carrier.weightLimit}kg）`,
+          suggestion: `建议拆分为多个包裹，或更换为限重更高的承运商`
         });
       } else {
         waybillExceptions.push({
           type: 'weight_warning',
           severity: 'medium',
-          message: `包裹重量较大（${waybill.weight}kg）`,
-          suggestion: '请注意搬运和运输安全'
+          message: `重量较大：${waybill.weight}kg`,
+          suggestion: '请注意搬运安全，建议使用加固包装'
         });
       }
     }
@@ -240,28 +278,35 @@ function handleCheckExceptions(data, sendResponse) {
         waybillExceptions.push({
           type: 'time_critical',
           severity: 'medium',
-          message: '时效要求较高',
-          suggestion: '建议选择时效快的承运商（如顺丰）'
+          message: '时效紧急：' + waybill.timeRequirement,
+          suggestion: '建议优先安排，选择顺丰等时效快的承运商'
         });
       }
     }
 
-    const duplicates = waybills.filter(w => w.waybillNumber === waybill.waybillNumber);
-    if (duplicates.length > 1) {
+    const duplicateIndices = waybillNumberMap[waybill.waybillNumber] || [];
+    if (duplicateIndices.length > 1) {
+      const positions = duplicateIndices.map(i => i + 1).join('、');
       waybillExceptions.push({
         type: 'duplicate',
         severity: 'high',
-        message: '检测到重复运单',
-        suggestion: `共有${duplicates.length}条相同运单号记录，请核实`
+        message: `重复运单：第${positions}条记录重复（共${duplicateIndices.length}条）`,
+        suggestion: '请核实是否重复下单，确认后删除重复记录'
       });
     }
 
     if (waybillExceptions.length > 0) {
+      const maxSeverity = waybillExceptions.some(e => e.severity === 'high') ? 'high' :
+                          waybillExceptions.some(e => e.severity === 'medium') ? 'medium' : 'low';
       exceptions.push({
+        _id: waybill._id || ('ex_' + Date.now() + '_' + idx),
+        _index: idx,
         waybillNumber: waybill.waybillNumber,
         address: waybill.address,
         weight: waybill.weight,
         carrier: waybill.carrier,
+        timeRequirement: waybill.timeRequirement,
+        severity: maxSeverity,
         exceptions: waybillExceptions
       });
     }
@@ -298,6 +343,12 @@ function handleEstimateCost(data, sendResponse) {
   sendResponse({ success: true, data: estimates });
 }
 
+function extractArea(address) {
+  if (!address) return '';
+  const match = address.match(/([\u4e00-\u9fa5]{2,10}?(?:区|县|镇|街道))/);
+  return match ? match[1] : '';
+}
+
 function handleCheckRoute(data, sendResponse) {
   const { waybills } = data;
   const routeAnalysis = [];
@@ -311,7 +362,65 @@ function handleCheckRoute(data, sendResponse) {
     groupedByCity[city].push(waybill);
   });
 
+  const mainCities = Object.keys(groupedByCity).filter(c => c !== '未知');
+  const waybillsWithCity = waybills.filter(w => extractCity(w.address));
+
+  if (mainCities.length >= 2) {
+    const cityCounts = mainCities.map(c => ({ city: c, count: groupedByCity[c].length }));
+    const maxCount = Math.max(...cityCounts.map(c => c.count));
+    const totalCount = cityCounts.reduce((sum, c) => sum + c.count, 0);
+    const dispersion = 1 - (maxCount / totalCount);
+
+    if (mainCities.length === 2) {
+      routeAnalysis.push({
+        type: 'cross_city_dispatch',
+        severity: dispersion > 0.3 ? 'medium' : 'low',
+        cities: mainCities,
+        count: totalCount,
+        dispersion: Math.round(dispersion * 100),
+        message: `跨城市配送：${mainCities.join(' → ')}（共${totalCount}单）`,
+        suggestion: '建议按城市分两车配送，或按路线方向排序装车减少绕路'
+      });
+    } else if (mainCities.length >= 3) {
+      routeAnalysis.push({
+        type: 'detour_risk',
+        severity: dispersion > 0.2 ? 'high' : 'medium',
+        cities: mainCities,
+        count: mainCities.length,
+        dispersion: Math.round(dispersion * 100),
+        message: `⚠️ 绕路风险：订单分布在${mainCities.length}个城市（${mainCities.join('、')}），分散度${Math.round(dispersion * 100)}%`,
+        suggestion: '强烈建议按城市分批次处理，同方向城市可安排一条线路，避免来回绕行'
+      });
+    }
+  }
+
+  if (mainCities.length > 3) {
+    routeAnalysis.push({
+      type: 'multiple_cities',
+      severity: 'medium',
+      cities: mainCities,
+      count: mainCities.length,
+      message: `多城市分布：订单覆盖${mainCities.length}个城市`,
+      suggestion: '建议按区域集群（如华东/华南）分组，再安排配送线路'
+    });
+  }
+
   Object.entries(groupedByCity).forEach(([city, cityWaybills]) => {
+    if (city === '未知') {
+      if (cityWaybills.length >= 2) {
+        routeAnalysis.push({
+          type: 'unknown_area',
+          severity: 'medium',
+          city: city,
+          count: cityWaybills.length,
+          waybills: cityWaybills.map(w => w.waybillNumber),
+          message: `${cityWaybills.length}个订单地址无法识别城市`,
+          suggestion: '请补充完整地址信息后再规划路线'
+        });
+      }
+      return;
+    }
+
     if (cityWaybills.length >= 2) {
       const areaGroups = {};
       cityWaybills.forEach(w => {
@@ -322,6 +431,20 @@ function handleCheckRoute(data, sendResponse) {
         areaGroups[area].push(w);
       });
 
+      const areaCount = Object.keys(areaGroups).length;
+      if (areaCount >= 3 && cityWaybills.length >= 5) {
+        routeAnalysis.push({
+          type: 'inner_city_detour',
+          severity: 'medium',
+          city: city,
+          areas: Object.keys(areaGroups),
+          count: cityWaybills.length,
+          areaCount: areaCount,
+          message: `${city}内部分散：${cityWaybills.length}单分布在${areaCount}个区域（${Object.keys(areaGroups).join('、')}）`,
+          suggestion: '建议按区域分组派送，相邻区域安排同一配送员'
+        });
+      }
+
       Object.entries(areaGroups).forEach(([area, areaWaybills]) => {
         if (areaWaybills.length >= 2) {
           routeAnalysis.push({
@@ -331,25 +454,18 @@ function handleCheckRoute(data, sendResponse) {
             city: city,
             waybills: areaWaybills.map(w => w.waybillNumber),
             count: areaWaybills.length,
-            message: `发现${areaWaybills.length}个同区域订单可合并配送`,
-            suggestion: '建议合并派送以降低成本和提高效率'
+            message: `✅ 合单机会：${city}${area}有${areaWaybills.length}个同区域订单`,
+            suggestion: '建议合并为一次派送，节省配送成本约' + (areaWaybills.length - 1) * 8 + '元'
           });
         }
       });
     }
   });
 
-  const mainCities = Object.keys(groupedByCity).filter(c => c !== '未知');
-  if (mainCities.length > 3) {
-    routeAnalysis.push({
-      type: 'multiple_cities',
-      severity: 'medium',
-      cities: mainCities,
-      count: mainCities.length,
-      message: `订单分布在${mainCities.length}个城市`,
-      suggestion: '建议按城市分批次处理，优化运输路线'
-    });
-  }
+  routeAnalysis.sort((a, b) => {
+    const weight = { high: 3, medium: 2, low: 1 };
+    return weight[b.severity] - weight[a.severity];
+  });
 
   sendResponse({ success: true, data: routeAnalysis });
 }
@@ -360,18 +476,23 @@ function handleExportData(data, sendResponse) {
   let mimeType = '';
 
   if (format === 'csv') {
-    const headers = ['运单号', '地址', '重量(kg)', '承运商', '时效要求', '异常类型', '异常信息', '处理建议', '备注'];
-    const rows = records.map(r => [
-      r.waybillNumber || '',
-      r.address || '',
-      r.weight || '',
-      r.carrierName || '',
-      r.timeRequirement || '',
-      r.exceptionTypes ? r.exceptionTypes.join('; ') : '',
-      r.messages ? r.messages.join('; ') : '',
-      r.suggestions ? r.suggestions.join('; ') : '',
-      r.remark || ''
-    ]);
+    const headers = ['运单号', '地址', '重量(kg)', '承运商', '时效要求', '异常类型', '异常信息', '处理建议', '处理状态', '备注', '更新时间'];
+    const rows = records.map(r => {
+      const statusLabels = { pending: '待处理', processing: '处理中', completed: '已完成' };
+      return [
+        r.waybillNumber || '',
+        r.address || '',
+        r.weight || '',
+        r.carrierName || '',
+        r.timeRequirement || '',
+        r.exceptionTypes ? r.exceptionTypes.join('; ') : '',
+        r.messages ? r.messages.join('; ') : '',
+        r.suggestions ? r.suggestions.join('; ') : '',
+        statusLabels[r.status] || r.status || '未标记',
+        r.remark || '',
+        r.updatedAt || ''
+      ];
+    });
     content = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     mimeType = 'text/csv;charset=utf-8';
     content = '\ufeff' + content;

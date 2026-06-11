@@ -1,52 +1,215 @@
-.logistics-highlight {
-  padding: 2px 4px;
-  border-radius: 3px;
-  cursor: help;
-  font-weight: 500;
+.logistics-highlight-wrapper {
   position: relative;
-  transition: all 0.2s ease;
+  display: inline-block;
+  margin: 0 2px;
+  cursor: help;
 }
 
-.logistics-highlight:hover {
-  opacity: 0.8;
+.logistics-highlight {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  position: relative;
+  transition: all 0.2s ease;
+  display: inline-block;
+}
+
+.logistics-highlight-wrapper:hover .logistics-highlight {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .logistics-highlight-high {
   background-color: #fee2e2;
-  color: #dc2626;
-  border: 1px solid #fca5a5;
-  animation: logistics-pulse-high 2s infinite;
+  color: #b91c1c;
+  border: 1.5px solid #ef4444;
+  animation: logistics-pulse-high 2.5s infinite;
 }
 
 .logistics-highlight-medium {
   background-color: #fef3c7;
-  color: #d97706;
-  border: 1px solid #fcd34d;
-  animation: logistics-pulse-medium 2s infinite;
+  color: #b45309;
+  border: 1.5px solid #f59e0b;
+  animation: logistics-pulse-medium 2.5s infinite;
 }
 
 .logistics-highlight-low {
   background-color: #dbeafe;
-  color: #2563eb;
-  border: 1px solid #93c5fd;
+  color: #1d4ed8;
+  border: 1.5px solid #3b82f6;
+}
+
+.logistics-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 8px;
+  margin-left: -6px;
+  position: relative;
+  top: -8px;
+  z-index: 1;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.logistics-badge-high {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+}
+
+.logistics-badge-medium {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+}
+
+.logistics-badge-low {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
 }
 
 @keyframes logistics-pulse-high {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0);
   }
 }
 
 @keyframes logistics-pulse-medium {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(217, 119, 6, 0);
+    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);
   }
+}
+
+.logistics-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 2147483647;
+  width: 320px;
+  max-width: calc(100vw - 20px);
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1f2937;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  animation: tooltip-in 0.18s ease-out;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tooltip-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-weight: 600;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.tooltip-severity {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.tooltip-severity-high {
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.tooltip-severity-medium {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.tooltip-severity-low {
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.tooltip-waybill {
+  font-family: 'Courier New', 'Menlo', monospace;
+  font-size: 11px;
+  color: #6b7280;
+  background: #f9fafb;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+}
+
+.tooltip-body {
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tooltip-exception {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #f9fafb;
+  border-radius: 6px;
+  border: 1px solid #f3f4f6;
+}
+
+.tooltip-exception:last-child {
+  margin-bottom: 0;
+}
+
+.tooltip-exception-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #111827;
+  font-size: 12px;
+}
+
+.tooltip-icon {
+  margin-right: 5px;
+  font-size: 13px;
+}
+
+.tooltip-exception-message {
+  color: #374151;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  padding-left: 18px;
+}
+
+.tooltip-exception-suggestion {
+  color: #2563eb;
+  font-size: 11px;
+  padding: 5px 8px;
+  padding-left: 18px;
+  background: #eff6ff;
+  border-radius: 4px;
+  border-left: 2px solid #3b82f6;
+  margin-left: 13px;
+  line-height: 1.5;
 }
 
 .logistics-float-btn {
