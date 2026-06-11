@@ -482,21 +482,8 @@ const LogisticsExtractor = {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
     case 'extractWaybill':
-      const waybills = LogisticsExtractor.extractFromPage();
-      sendResponse({ success: true, data: waybills });
-      if (waybills.length > 0) {
-        chrome.runtime.sendMessage({
-          action: 'saveWaybillData',
-          data: waybills
-        });
-        chrome.runtime.sendMessage({
-          action: 'showNotification',
-          data: {
-            title: '提取成功',
-            message: `成功提取 ${waybills.length} 条运单信息`
-          }
-        });
-      }
+      const extractedWaybills = LogisticsExtractor.extractFromPage();
+      sendResponse({ success: true, data: extractedWaybills });
       break;
     case 'checkExceptions':
       const extracted = LogisticsExtractor.extractFromPage();

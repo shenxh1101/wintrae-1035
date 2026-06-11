@@ -163,17 +163,30 @@ async function handleDeleteTemplate(id, sendResponse) {
   sendResponse({ success: true, data: filtered });
 }
 
+function generateWaybillId() {
+  return 'wb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
 async function handleSaveWaybillData(data, sendResponse) {
   const result = await chrome.storage.local.get(WAYBILL_DATA_KEY);
   const existing = result[WAYBILL_DATA_KEY] || [];
-  const merged = [
-    ...existing,
-    ...data.map(w => ({
+  const existingMap = new Map(existing.map(w => [w._id, w]));
+
+  data.forEach(w => {
+    const id = w._id || generateWaybillId();
+    const newWaybill = {
+      ...existingMap.get(id),
       ...w,
-      _id: w._id || ('wb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)),
+      _id: id,
       updatedAt: new Date().toISOString()
-    }))
-  ];
+    };
+    if (!newWaybill.createdAt) {
+      newWaybill.createdAt = new Date().toISOString();
+    }
+    existingMap.set(id, newWaybill);
+  });
+
+  const merged = Array.from(existingMap.values());
   await chrome.storage.local.set({ [WAYBILL_DATA_KEY]: merged });
   sendResponse({ success: true, data: merged });
 }

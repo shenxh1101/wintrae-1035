@@ -744,21 +744,22 @@ const SidebarApp = {
 
     const remarkInput = document.querySelector('.remark-input');
     const remark = remarkInput?.value.trim() || '';
+    const selectedId = this.state.selectedWaybill._id || this.state.selectedWaybill.waybillNumber;
 
     const workOrder = this.state.workOrders.find(
-      w => w.waybillNumber === this.state.selectedWaybill.waybillNumber
+      w => w._id === selectedId || w.waybillNumber === this.state.selectedWaybill.waybillNumber
     );
-
     if (workOrder) {
       workOrder.remark = remark;
       workOrder.updatedAt = new Date().toISOString();
     }
 
     const waybill = this.state.waybills.find(
-      w => w.waybillNumber === this.state.selectedWaybill.waybillNumber
+      w => w._id === selectedId || w.waybillNumber === this.state.selectedWaybill.waybillNumber
     );
     if (waybill) {
       waybill.remark = remark;
+      waybill.updatedAt = new Date().toISOString();
     }
 
     try {
@@ -769,7 +770,7 @@ const SidebarApp = {
         }),
         this.sendMessage({
           action: 'saveWaybillData',
-          data: this.state.waybills
+          data: [waybill].filter(Boolean)
         })
       ]);
     } catch (e) {
@@ -782,8 +783,8 @@ const SidebarApp = {
     this.showToast('备注保存成功', 'success');
   },
 
-  async updateWorkOrderStatus(waybillNumber, status) {
-    const workOrder = this.state.workOrders.find(w => w.waybillNumber === waybillNumber);
+  async updateWorkOrderStatus(id, status) {
+    const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
     if (workOrder) {
       workOrder.status = status;
       workOrder.updatedAt = new Date().toISOString();
@@ -798,6 +799,7 @@ const SidebarApp = {
       }
 
       this.renderWorkOrders();
+      this.renderWaybillList();
       this.updateStats();
       this.showToast(`状态已更新为：${this.getStatusLabel(status)}`, 'success');
     }
@@ -956,19 +958,27 @@ const SidebarApp = {
 
     container.querySelectorAll('.waybill-card').forEach(card => {
       card.addEventListener('click', () => {
-        const waybillNumber = card.dataset.waybill;
-        this.openWaybillDetail(waybillNumber);
+        const waybillId = card.dataset.id || card.dataset.waybill;
+        this.openWaybillDetail(waybillId);
       });
     });
   },
 
-  openWaybillDetail(waybillNumber) {
-    const waybill = this.state.waybills.find(w => w.waybillNumber === waybillNumber);
-    const exception = this.state.exceptions.find(e => e.waybillNumber === waybillNumber);
-    const workOrder = this.state.workOrders.find(w => w.waybillNumber === waybillNumber);
-    const costEstimate = this.state.costEstimates.find(c => c.waybillNumber === waybillNumber);
-
+  openWaybillDetail(waybillId) {
+    const waybill = this.state.waybills.find(w => w._id === waybillId) ||
+                   this.state.waybills.find(w => w.waybillNumber === waybillId);
     if (!waybill) return;
+
+    const waybillIndex = this.state.waybills.indexOf(waybill) + 1;
+    const sameNumberCount = this.state.waybills.filter(w => w.waybillNumber === waybill.waybillNumber).length;
+    const isDuplicate = sameNumberCount > 1;
+
+    const exceptionKey = waybill._id || waybill.waybillNumber;
+    const exception = this.state.exceptions.find(e => e._id === waybill._id) ||
+                      this.state.exceptions.find(e => e.waybillNumber === waybill.waybillNumber);
+    const workOrder = this.state.workOrders.find(w => w._id === waybill._id) ||
+                      this.state.workOrders.find(w => w.waybillNumber === waybill.waybillNumber);
+    const costEstimate = this.state.costEstimates.find(c => c.waybillNumber === waybill.waybillNumber);
 
     this.state.selectedWaybill = waybill;
     const carrier = this.state.settings?.carriers.find(c => c.id === waybill.carrier);
@@ -1026,13 +1036,30 @@ const SidebarApp = {
     }
 
     const remark = workOrder?.remark || waybill.remark || '';
+    const status = workOrder?.status || '未标记';
+
+    const duplicateInfo = isDuplicate
+      ? `<span class="duplicate-info-badge">🔁 第 ${this.state.waybills.filter(w => w.waybillNumber === waybill.waybillNumber).indexOf(waybill) + 1} / ${sameNumberCount} 条重复记录</span>`
+      : '';
+
+    const statusInfo = workOrder
+      ? `<span class="status-info-badge status-info-${workOrder.status}">${this.getStatusLabel(workOrder.status)}</span>`
+      : `<span class="status-info-badge status-info-pending">未标记</span>`;
 
     document.getElementById('modalBody').innerHTML = `
       <div class="detail-section">
-        <h4>基本信息</h4>
+        <h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          基本信息
+          ${duplicateInfo}
+          ${statusInfo}
+        </h4>
         <div class="detail-row">
           <span class="detail-label">运单号:</span>
           <span class="detail-value" style="font-family: 'SF Mono', Consolas, monospace;">${waybill.waybillNumber}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">记录编号:</span>
+          <span class="detail-value" style="color: #6b7280; font-size: 12px;">#${waybillIndex}${waybill._id ? ' · ' + waybill._id.slice(-8) : ''}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">收件地址:</span>
@@ -1323,16 +1350,28 @@ const SidebarApp = {
       return;
     }
 
-    container.innerHTML = workOrders.map(wo => {
+    const waybillNumberCount = {};
+    this.state.workOrders.forEach(w => {
+      waybillNumberCount[w.waybillNumber] = (waybillNumberCount[w.waybillNumber] || 0) + 1;
+    });
+
+    container.innerHTML = workOrders.map((wo, idx) => {
       const maxSeverity = wo.exceptions.reduce((max, e) => {
         const order = { high: 3, medium: 2, low: 1 };
         return order[e.severity] > (order[max] || 0) ? e.severity : max;
       }, 'low');
 
+      const woKey = wo._id || wo.id || wo.waybillNumber;
+      const isDup = waybillNumberCount[wo.waybillNumber] > 1;
+      const dupIndex = this.state.workOrders.filter(w => w.waybillNumber === wo.waybillNumber).indexOf(wo) + 1;
+
       return `
         <div class="work-order-card ${wo.status}">
           <div class="work-order-header">
-            <span class="work-order-waybill">${wo.waybillNumber}</span>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span class="work-order-waybill">${wo.waybillNumber}</span>
+              ${isDup ? `<span class="work-order-dup">#${dupIndex}</span>` : ''}
+            </div>
             <span class="work-order-status status-${wo.status}">${this.getStatusLabel(wo.status)}</span>
           </div>
           <div class="work-order-exceptions">
@@ -1351,12 +1390,12 @@ const SidebarApp = {
           </div>
           ` : ''}
           <div class="work-order-actions">
-            <button class="btn btn-secondary" data-action="view" data-waybill="${wo.waybillNumber}">查看详情</button>
+            <button class="btn btn-secondary" data-action="view" data-id="${woKey}">查看详情</button>
             ${wo.status === 'pending' ? `
-              <button class="btn btn-primary" data-action="process" data-waybill="${wo.waybillNumber}">开始处理</button>
+              <button class="btn btn-primary" data-action="process" data-id="${woKey}">开始处理</button>
             ` : ''}
             ${wo.status === 'processing' ? `
-              <button class="btn btn-success" data-action="complete" data-waybill="${wo.waybillNumber}">标记完成</button>
+              <button class="btn btn-success" data-action="complete" data-id="${woKey}">标记完成</button>
             ` : ''}
           </div>
         </div>
@@ -1365,22 +1404,22 @@ const SidebarApp = {
 
     container.querySelectorAll('[data-action="view"]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const waybillNumber = btn.dataset.waybill;
-        this.openWaybillDetail(waybillNumber);
+        const id = btn.dataset.id;
+        this.openWaybillDetail(id);
       });
     });
 
     container.querySelectorAll('[data-action="process"]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const waybillNumber = btn.dataset.waybill;
-        this.updateWorkOrderStatus(waybillNumber, 'processing');
+        const id = btn.dataset.id;
+        this.updateWorkOrderStatus(id, 'processing');
       });
     });
 
     container.querySelectorAll('[data-action="complete"]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const waybillNumber = btn.dataset.waybill;
-        this.updateWorkOrderStatus(waybillNumber, 'completed');
+        const id = btn.dataset.id;
+        this.updateWorkOrderStatus(id, 'completed');
       });
     });
 
