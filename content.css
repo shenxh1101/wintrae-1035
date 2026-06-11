@@ -1,0 +1,84 @@
+.logistics-highlight {
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: help;
+  font-weight: 500;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.logistics-highlight:hover {
+  opacity: 0.8;
+}
+
+.logistics-highlight-high {
+  background-color: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  animation: logistics-pulse-high 2s infinite;
+}
+
+.logistics-highlight-medium {
+  background-color: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fcd34d;
+  animation: logistics-pulse-medium 2s infinite;
+}
+
+.logistics-highlight-low {
+  background-color: #dbeafe;
+  color: #2563eb;
+  border: 1px solid #93c5fd;
+}
+
+@keyframes logistics-pulse-high {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0);
+  }
+}
+
+@keyframes logistics-pulse-medium {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(217, 119, 6, 0);
+  }
+}
+
+.logistics-float-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  cursor: pointer;
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0.95;
+}
+
+.logistics-float-btn:hover {
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+  opacity: 1;
+}
+
+.logistics-float-btn:active {
+  transform: scale(0.95);
+}
+
+.logistics-float-btn svg {
+  width: 28px;
+  height: 28px;
+}

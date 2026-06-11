@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智慧物流插件 - 测试页面</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: #f0f2f5;
+      padding: 20px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      color: #1f2937;
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #6b7280;
+    }
+
+    .instructions {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .instructions h3 {
+      color: #1e40af;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .instructions ol {
+      padding-left: 20px;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    .instructions li {
+      margin-bottom: 4px;
+    }
+
+    .section {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      margin-bottom: 20px;
+    }
+
+    .section h2 {
+      color: #1f2937;
+      font-size: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section h2::before {
+      content: '';
+      width: 4px;
+      height: 20px;
+      background: #3b82f6;
+      border-radius: 2px;
+    }
+
+    .waybill-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+
+    .waybill-table th,
+    .waybill-table td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .waybill-table th {
+      background: #f9fafb;
+      font-weight: 600;
+      color: #374151;
+      font-size: 13px;
+    }
+
+    .waybill-table td {
+      color: #4b5563;
+      font-size: 13px;
+    }
+
+    .waybill-number {
+      font-family: 'SF Mono', Consolas, monospace;
+      color: #2563eb;
+      font-weight: 500;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .tag-normal {
+      background: #d1fae5;
+      color: #059669;
+    }
+
+    .tag-warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .tag-danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    .tag-info {
+      background: #dbeafe;
+      color: #2563eb;
+    }
+
+    .waybill-detail {
+      background: #f9fafb;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .waybill-detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .waybill-detail-header h3 {
+      font-size: 15px;
+      color: #1f2937;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .detail-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .detail-label {
+      font-size: 11px;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .detail-value {
+      font-size: 13px;
+      color: #374151;
+    }
+
+    .highlight-section {
+      background: #fef3c7;
+      border: 1px dashed #f59e0b;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .highlight-section h3 {
+      color: #92400e;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .highlight-section p {
+      color: #78350f;
+      font-size: 13px;
+    }
+
+    .test-data-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .test-data-item {
+      padding: 16px;
+      background: #fafafa;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .test-data-item:hover {
+      background: #f0f9ff;
+      border-color: #3b82f6;
+    }
+
+    .test-data-item strong {
+      color: #2563eb;
+    }
+
+    .select-hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 8px;
+      font-style: italic;
+    }
+
+    @media (max-width: 768px) {
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .waybill-table {
+        font-size: 11px;
+      }
+      
+      .waybill-table th,
+      .waybill-table td {
+        padding: 8px 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚚 智慧物流插件 - 测试页面</h1>
+      <p>本页面包含各种类型的运单测试数据，用于验证智慧物流插件的识别和分析功能</p>
+    </div>
+
+    <div class="instructions">
+      <h3>📋 使用说明</h3>
+      <ol>
+        <li>确保已在Chrome浏览器中加载「智慧物流助手」扩展</li>
+        <li>点击浏览器工具栏中的插件图标打开侧边栏</li>
+        <li>点击「提取页面运单」按钮，或右键选择「提取运单信息」</li>
+        <li>也可以选中下方的测试文本后右键提取</li>
+        <li>测试各种异常场景，验证插件的异常检测功能</li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <h2>📊 运单列表（表格格式）</h2>
+      <table class="waybill-table">
+        <thead>
+          <tr>
+            <th>运单号</th>
+            <th>收件地址</th>
+            <th>重量</th>
+            <th>承运商</th>
+            <th>时效要求</th>
+            <th>预期异常</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="waybill-number">SF1234567890123</span></td>
+            <td>北京市朝阳区建国路88号SOHO现代城A座1201室</td>
+            <td>2.5 kg</td>
+            <td>顺丰速运</td>
+            <td>次日达</td>
+            <td><span class="tag tag-normal">正常</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">JD9876543210987</span></td>
+            <td>上海市浦东新区陆家嘴金融中心88号</td>
+            <td>65 kg</td>
+            <td>京东物流</td>
+            <td>普通</td>
+            <td><span class="tag tag-danger">超重</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">ZT5678901234567</span></td>
+            <td>广州天河区</td>
+            <td>3 kg</td>
+            <td>中通快递</td>
+            <td>当日达</td>
+            <td><span class="tag tag-warning">地址不完整</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">YT1122334455667</span></td>
+            <td>西藏自治区阿里地区噶尔县狮泉河镇北京路100号</td>
+            <td>5 kg</td>
+            <td>圆通速递</td>
+            <td>标准</td>
+            <td><span class="tag tag-danger">超区</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">SF1234567890123</span></td>
+            <td>北京市朝阳区建国路88号SOHO现代城A座1201室</td>
+            <td>2.5 kg</td>
+            <td>顺丰速运</td>
+            <td>次日达</td>
+            <td><span class="tag tag-danger">重复运单</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">JD2233445566778</span></td>
+            <td>深圳市南山区科技园南区高新南一道飞亚达科技大厦15层</td>
+            <td>8 kg</td>
+            <td>京东物流</td>
+            <td>急件 当日送达</td>
+            <td><span class="tag tag-info">时效紧急</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">ZT3344556677889</span></td>
+            <td>杭州市西湖区文三路478号华星时代广场C座2205室</td>
+            <td>1.2 kg</td>
+            <td>中通快递</td>
+            <td>普通</td>
+            <td><span class="tag tag-normal">正常</span></td>
+          </tr>
+          <tr>
+            <td><span class="waybill-number">YT4455667788990</span></td>
+            <td>成都市高新区天府大道北段1480号天府万科中心32楼</td>
+            <td>55 kg</td>
+            <td>圆通速递</td>
+            <td>普通</td>
+            <td><span class="tag tag-warning">重量警告</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>📝 运单详情（卡片格式）</h2>
+      <div class="waybill-detail">
+        <div class="waybill-detail-header">
+          <h3>运单详情 - <span class="waybill-number">SF1234567890123</span></h3>
+          <span class="tag tag-normal">正常</span>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">运单号</span>
+            <span class="detail-value">SF1234567890123</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">收件人</span>
+            <span class="detail-value">张三</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">联系电话</span>
+            <span class="detail-value">13812345678</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">收件地址</span>
+            <span class="detail-value">北京市朝阳区建国路88号SOHO现代城A座1201室</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">重量</span>
+            <span class="detail-value">2.5 kg</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">体积</span>
+            <span class="detail-value">20×30×40 cm</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">承运商</span>
+            <span class="detail-value">顺丰速运</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">时效要求</span>
+            <span class="detail-value">次日达</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">物品类型</span>
+            <span class="detail-value">电子产品</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">下单时间</span>
+            <span class="detail-value">2026-06-11 09:30:00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="waybill-detail">
+        <div class="waybill-detail-header">
+          <h3>运单详情 - <span class="waybill-number">JD9876543210987</span></h3>
+          <span class="tag tag-danger">超重异常</span>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">运单号</span>
+            <span class="detail-value">JD9876543210987</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">收件人</span>
+            <span class="detail-value">李四</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">联系电话</span>
+            <span class="detail-value">13987654321</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">收件地址</span>
+            <span class="detail-value">上海市浦东新区陆家嘴金融中心88号</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">重量</span>
+            <span class="detail-value">65 kg</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">体积</span>
+            <span class="detail-value">100×80×60 cm</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">承运商</span>
+            <span class="detail-value">京东物流</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">时效要求</span>
+            <span class="detail-value">普通</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">物品类型</span>
+            <span class="detail-value">机械设备</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">下单时间</span>
+            <span class="detail-value">2026-06-11 10:15:00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>🎯 测试异常场景</h2>
+      
+      <div class="highlight-section">
+        <h3>💡 测试提示</h3>
+        <p>选中下方的文本块，右键选择「智慧物流助手 → 提取运单信息」或点击右下角悬浮按钮提取数据。</p>
+      </div>
+
+      <div class="test-data-list">
+        <div class="test-data-item">
+          <strong>【正常运单】</strong><br>
+          运单号：SF1234567890123<br>
+          收货地址：浙江省杭州市西湖区文三路478号华星时代广场C座2205室<br>
+          重量：1.2 kg<br>
+          承运商：顺丰速运<br>
+          时效要求：次日达<br>
+          联系人：王五 13512345678
+        </div>
+
+        <div class="test-data-item">
+          <strong>【地址不完整】</strong><br>
+          运单号：ZT5678901234567<br>
+          收件地址：广州天河区<br>
+          重量：3 kg<br>
+          快递公司：中通快递<br>
+          配送要求：当日送达
+        </div>
+
+        <div class="test-data-item">
+          <strong>【超区件】</strong><br>
+          运单编号：YT1122334455667<br>
+          送达地址：西藏自治区阿里地区噶尔县狮泉河镇北京路100号<br>
+          包裹重量：5千克<br>
+          物流公司：圆通速递<br>
+          时间要求：标准配送
+        </div>
+
+        <div class="test-data-item">
+          <strong>【超重件】</strong><br>
+          单号：JD9876543210987<br>
+          收货地址：上海市浦东新区陆家嘴金融中心88号<br>
+          重量：65kg<br>
+          承运商：京东物流<br>
+          时效：普通
+        </div>
+
+        <div class="test-data-item">
+          <strong>【重复运单 - 与第一个重复】</strong><br>
+          运单号：SF1234567890123<br>
+          收货地址：北京市朝阳区建国路88号SOHO现代城A座1201室<br>
+          重量：2.5 kg<br>
+          承运商：顺丰速运<br>
+          时效要求：次日达
+        </div>
+
+        <div class="test-data-item">
+          <strong>【多单同区域 - 合单机会】</strong><br>
+          运单号：SF2233445566778<br>
+          收货地址：杭州市西湖区文三路100号东方通信大厦10楼<br>
+          重量：1.5 kg<br>
+          承运商：顺丰速运<br>
+          时效：次日达<br>
+          ---<br>
+          运单号：ZT5566778899001<br>
+          收货地址：杭州市西湖区文二路391号西湖国际科技大厦A座18层<br>
+          重量：2.8 kg<br>
+          承运商：中通快递<br>
+          时效：普通<br>
+          ---<br>
+          运单号：JD6677889900112<br>
+          收货地址：杭州市西湖区文一路458号杭州数字产业园5号楼<br>
+          重量：3.2 kg<br>
+          承运商：京东物流<br>
+          时效：普通
+        </div>
+
+        <div class="test-data-item">
+          <strong>【多城市分布 - 路线规划】</strong><br>
+          运单号：YT7788990011223<br>
+          地址：北京市海淀区中关村南大街5号北京理工大学<br>
+          重量：2 kg<br>
+          ---<br>
+          运单号：SF8899001122334<br>
+          地址：上海市杨浦区邯郸路220号复旦大学<br>
+          重量：1.5 kg<br>
+          ---<br>
+          运单号：ZT9900112233445<br>
+          地址：广州市天河区五山路381号华南理工大学<br>
+          重量：3 kg<br>
+          ---<br>
+          运单号：JD0011223344556<br>
+          地址：成都市武侯区一环路南一段24号四川大学<br>
+          重量：2.5 kg<br>
+          ---<br>
+          运单号：YT1122334455667<br>
+          地址：武汉市武昌区八一路299号武汉大学<br>
+          重量：1.8 kg
+        </div>
+      </div>
+
+      <p class="select-hint">💡 提示：可以使用鼠标拖拽选中上述任意文本块，然后右键选择提取运单信息</p>
+    </div>
+
+    <div class="section">
+      <h2>⚙️ 插件功能验证清单</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #3b82f6;">
+          <h4 style="margin-bottom: 8px; color: #1f2937;">✅ 批量识别</h4>
+          <ul style="list-style: none; font-size: 12px; color: #6b7280;">
+            <li>□ 运单号自动识别</li>
+            <li>□ 地址信息提取</li>
+            <li>□ 重量提取（kg/千克）</li>
+            <li>□ 时效要求识别</li>
+            <li>□ 承运商识别</li>
+          </ul>
+        </div>
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #ef4444;">
+          <h4 style="margin-bottom: 8px; color: #1f2937;">✅ 异常检测</h4>
+          <ul style="list-style: none; font-size: 12px; color: #6b7280;">
+            <li>□ 地址不完整检测</li>
+            <li>□ 超区件检测</li>
+            <li>□ 超重件检测</li>
+            <li>□ 重复运单检测</li>
+            <li>□ 时效紧急标记</li>
+          </ul>
+        </div>
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #10b981;">
+          <h4 style="margin-bottom: 8px; color: #1f2937;">✅ 费用估算</h4>
+          <ul style="list-style: none; font-size: 12px; color: #6b7280;">
+            <li>□ 按承运商规则计算</li>
+            <li>□ 基础运费+续重费用</li>
+            <li>□ 多承运商切换</li>
+            <li>□ 配送时段估算</li>
+            <li>□ 费用汇总统计</li>
+          </ul>
+        </div>
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #8b5cf6;">
+          <h4 style="margin-bottom: 8px; color: #1f2937;">✅ 路线检查</h4>
+          <ul style="list-style: none; font-size: 12px; color: #6b7280;">
+            <li>□ 同区域合单检测</li>
+            <li>□ 多城市分布分析</li>
+            <li>□ 地图预览展示</li>
+            <li>□ 绕路风险提示</li>
+            <li>□ 优化建议生成</li>
+          </ul>
+        </div>
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #f59e0b;">
+          <h4 style="margin-bottom: 8px; color: #1f2937;">✅ 异常工单</h4>
+          <ul style="list-style: none; font-size: 12px; color: #6b7280;">
+            <li>□ 一键写入备注</li>
+            <li>□ 异常原因模板</li>
+            <li>□ 工单状态流转</li>
+            <li>□ 导出待处理清单</li>
+            <li>□ 生成异常报告</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
