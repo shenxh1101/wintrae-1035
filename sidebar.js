@@ -10,7 +10,14 @@ const SidebarApp = {
     currentTab: 'batch',
     selectedWaybill: null,
     searchQuery: '',
-    exceptionFilter: 'all'
+    exceptionFilter: 'all',
+    selectedWorkOrderIds: new Set(),
+    exportFilters: {
+      status: 'all',
+      severity: 'all',
+      carrier: 'all',
+      search: ''
+    }
   },
 
   init() {
@@ -87,7 +94,7 @@ const SidebarApp = {
       }
     });
     document.getElementById('generateReportBtn').addEventListener('click', () => this.generateReport());
-    document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
+    document.getElementById('exportBtn').addEventListener('click', () => this.openExportPreview());
     document.getElementById('addTemplateBtn').addEventListener('click', () => this.openModal('templateModal'));
     document.getElementById('exceptionFilter').addEventListener('change', (e) => {
       this.state.exceptionFilter = e.target.value;
@@ -96,8 +103,12 @@ const SidebarApp = {
     document.getElementById('closeModal').addEventListener('click', () => this.closeModal('detailModal'));
     document.getElementById('closeTemplateModal').addEventListener('click', () => this.closeModal('templateModal'));
     document.getElementById('closeSettingsModal').addEventListener('click', () => this.closeModal('settingsModal'));
+    document.getElementById('closeExportPreviewModal').addEventListener('click', () => this.closeModal('exportPreviewModal'));
+    document.getElementById('closeBatchRemarkModal').addEventListener('click', () => this.closeModal('batchRemarkModal'));
     document.getElementById('cancelTemplateBtn').addEventListener('click', () => this.closeModal('templateModal'));
     document.getElementById('cancelSettingsBtn').addEventListener('click', () => this.closeModal('settingsModal'));
+    document.getElementById('cancelExportBtn').addEventListener('click', () => this.closeModal('exportPreviewModal'));
+    document.getElementById('cancelBatchRemarkBtn').addEventListener('click', () => this.closeModal('batchRemarkModal'));
     document.getElementById('saveTemplateBtn').addEventListener('click', () => this.saveTemplate());
     document.getElementById('saveSettingsBtn').addEventListener('click', () => this.saveSettings());
     document.getElementById('copyWaybillBtn').addEventListener('click', () => this.copyWaybillNumber());
@@ -109,6 +120,28 @@ const SidebarApp = {
         document.getElementById('modalOverlay').classList.remove('active');
       }
     });
+
+    document.getElementById('selectAllWorkOrders').addEventListener('change', (e) => {
+      this.toggleSelectAllWorkOrders(e.target.checked);
+    });
+    document.getElementById('batchProcessBtn').addEventListener('click', () => this.batchUpdateStatus('processing'));
+    document.getElementById('batchCompleteBtn').addEventListener('click', () => this.batchUpdateStatus('completed'));
+    document.getElementById('batchPendingBtn').addEventListener('click', () => this.batchUpdateStatus('pending'));
+    document.getElementById('batchRemarkBtn').addEventListener('click', () => this.openBatchRemarkModal());
+    document.getElementById('confirmBatchRemarkBtn').addEventListener('click', () => this.batchAppendRemark());
+    document.getElementById('batchRemarkTemplate').addEventListener('change', (e) => {
+      const template = this.state.templates.find(t => t.id === e.target.value);
+      if (template) {
+        document.getElementById('batchRemarkContent').value = template.content;
+      }
+    });
+
+    ['exportStatusFilter', 'exportSeverityFilter', 'exportCarrierFilter', 'exportSearch'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => this.renderExportPreview());
+      document.getElementById(id).addEventListener('input', () => this.renderExportPreview());
+    });
+    document.getElementById('exportCsvBtn').addEventListener('click', () => this.exportFromPreview('csv'));
+    document.getElementById('exportJsonBtn').addEventListener('click', () => this.exportFromPreview('json'));
   },
 
   setupTabs() {
@@ -814,6 +847,309 @@ const SidebarApp = {
     return labels[status] || status;
   },
 
+  updateBatchActionBar() {
+    const bar = document.getElementById('batchActionsBar');
+    if (!bar) return;
+
+    const total = this.state.workOrders.length;
+    const selected = this.state.selectedWorkOrderIds.size;
+
+    if (total === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+
+    bar.style.display = 'flex';
+    document.getElementById('selectedCount').textContent = selected;
+    document.getElementById('totalWorkOrderCount').textContent = total;
+
+    const selectAllCheckbox = document.getElementById('selectAllWorkOrders');
+    if (selectAllCheckbox) {
+      selectAllCheckbox.checked = selected > 0 && selected === total;
+      selectAllCheckbox.indeterminate = selected > 0 && selected < total;
+    }
+  },
+
+  toggleSelectAllWorkOrders(checked) {
+    const visibleWorkOrders = this.getFilteredWorkOrders();
+    visibleWorkOrders.forEach(wo => {
+      const key = wo._id || wo.id || wo.waybillNumber;
+      if (checked) {
+        this.state.selectedWorkOrderIds.add(key);
+      } else {
+        this.state.selectedWorkOrderIds.delete(key);
+      }
+    });
+    this.renderWorkOrders();
+  },
+
+  getFilteredWorkOrders() {
+    let workOrders = [...this.state.workOrders];
+    if (this.state.exceptionFilter !== 'all') {
+      workOrders = workOrders.filter(wo =>
+        wo.exceptions.some(e => e.severity === this.state.exceptionFilter)
+      );
+    }
+    return workOrders;
+  },
+
+  async batchUpdateStatus(status) {
+    if (this.state.selectedWorkOrderIds.size === 0) {
+      this.showToast('请先选择要操作的工单', 'warning');
+      return;
+    }
+
+    const count = this.state.selectedWorkOrderIds.size;
+    if (!confirm(`确定要将选中的 ${count} 条工单状态更新为「${this.getStatusLabel(status)}」吗？`)) return;
+
+    let updatedCount = 0;
+    this.state.selectedWorkOrderIds.forEach(id => {
+      const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
+      if (workOrder) {
+        workOrder.status = status;
+        workOrder.updatedAt = new Date().toISOString();
+        updatedCount++;
+      }
+    });
+
+    try {
+      await this.sendMessage({
+        action: 'saveWorkOrders',
+        data: this.state.workOrders
+      });
+    } catch (e) {
+      console.warn('批量保存工单失败:', e);
+    }
+
+    this.state.selectedWorkOrderIds.clear();
+    this.renderWorkOrders();
+    this.renderWaybillList();
+    this.updateStats();
+    this.showToast(`已将 ${updatedCount} 条工单更新为「${this.getStatusLabel(status)}」`, 'success');
+  },
+
+  openBatchRemarkModal() {
+    if (this.state.selectedWorkOrderIds.size === 0) {
+      this.showToast('请先选择要操作的工单', 'warning');
+      return;
+    }
+
+    document.getElementById('batchRemarkCount').textContent = this.state.selectedWorkOrderIds.size;
+
+    const templateSelect = document.getElementById('batchRemarkTemplate');
+    templateSelect.innerHTML = '<option value="">不使用模板</option>' +
+      this.state.templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    document.getElementById('batchRemarkContent').value = '';
+
+    this.openModal('batchRemarkModal');
+  },
+
+  async batchAppendRemark() {
+    const content = document.getElementById('batchRemarkContent').value.trim();
+    if (!content) {
+      this.showToast('请输入备注内容', 'warning');
+      return;
+    }
+
+    if (this.state.selectedWorkOrderIds.size === 0) {
+      this.showToast('请先选择要操作的工单', 'warning');
+      return;
+    }
+
+    const count = this.state.selectedWorkOrderIds.size;
+    if (!confirm(`确定要为 ${count} 条工单追加备注吗？`)) return;
+
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const remarkToAppend = `\n[${timestamp}] ${content}`;
+
+    let updatedCount = 0;
+    const waybillsToUpdate = [];
+
+    this.state.selectedWorkOrderIds.forEach(id => {
+      const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
+      if (workOrder) {
+        workOrder.remark = (workOrder.remark || '') + remarkToAppend;
+        workOrder.updatedAt = new Date().toISOString();
+        updatedCount++;
+
+        const waybill = this.state.waybills.find(w => w._id === id || w.waybillNumber === workOrder.waybillNumber);
+        if (waybill) {
+          waybill.remark = workOrder.remark;
+          waybillsToUpdate.push(waybill);
+        }
+      }
+    });
+
+    try {
+      await Promise.all([
+        this.sendMessage({
+          action: 'saveWorkOrders',
+          data: this.state.workOrders
+        }),
+        this.sendMessage({
+          action: 'saveWaybillData',
+          data: waybillsToUpdate
+        })
+      ]);
+    } catch (e) {
+      console.warn('批量保存备注失败:', e);
+    }
+
+    this.state.selectedWorkOrderIds.clear();
+    this.closeModal('batchRemarkModal');
+    this.renderWorkOrders();
+    this.renderWaybillList();
+    this.showToast(`已为 ${updatedCount} 条工单追加备注`, 'success');
+  },
+
+  openExportPreview() {
+    if (this.state.waybills.length === 0) {
+      this.showToast('没有数据可导出', 'warning');
+      return;
+    }
+
+    this.state.exportFilters = {
+      status: 'all',
+      severity: 'all',
+      carrier: 'all',
+      search: ''
+    };
+
+    const carrierSelect = document.getElementById('exportCarrierFilter');
+    const carriers = [...new Set(this.state.waybills.map(w => w.carrier).filter(Boolean))];
+    carrierSelect.innerHTML = '<option value="all">全部承运商</option>' +
+      carriers.map(c => {
+        const carrierName = this.state.settings?.carriers?.find(ca => ca.id === c)?.name || c;
+        return `<option value="${c}">${carrierName}</option>`;
+      }).join('');
+
+    document.getElementById('exportStatusFilter').value = 'all';
+    document.getElementById('exportSeverityFilter').value = 'all';
+    document.getElementById('exportSearch').value = '';
+
+    this.renderExportPreview();
+    this.openModal('exportPreviewModal');
+  },
+
+  getExportFilteredData() {
+    const { status, severity, carrier, search } = this.state.exportFilters;
+    const query = search.toLowerCase();
+
+    return this.state.waybills
+      .map((w, idx) => {
+        const workOrder = this.state.workOrders.find(wo => wo._id === w._id || wo.waybillNumber === w.waybillNumber);
+        const exception = this.state.exceptions.find(e => e._id === w._id || e.waybillNumber === w.waybillNumber);
+        const carrierInfo = this.state.settings?.carriers?.find(c => c.id === w.carrier);
+        const isDup = this.state.waybills.filter(x => x.waybillNumber === w.waybillNumber).length > 1;
+        const dupIndex = this.state.waybills.filter(x => x.waybillNumber === w.waybillNumber).indexOf(w) + 1;
+
+        const record = {
+          index: idx + 1,
+          waybillNumber: w.waybillNumber,
+          address: w.address,
+          weight: w.weight,
+          carrier: w.carrier,
+          carrierName: carrierInfo?.name || w.carrier || '未指定',
+          timeRequirement: w.timeRequirement || '',
+          exceptions: exception?.exceptions || [],
+          severity: exception?.severity || 'normal',
+          exceptionTypes: exception?.exceptions?.map(e => this.getSeverityLabel(e.type)) || [],
+          messages: exception?.exceptions?.map(e => e.message) || [],
+          suggestions: exception?.exceptions?.map(e => e.suggestion) || [],
+          status: workOrder?.status || 'unmarked',
+          remark: workOrder?.remark || w.remark || '',
+          updatedAt: workOrder?.updatedAt || w.updatedAt || new Date().toISOString(),
+          _id: w._id,
+          isDuplicate: isDup,
+          duplicateIndex: isDup ? dupIndex : null
+        };
+        return record;
+      })
+      .filter(r => {
+        if (status !== 'all' && r.status !== status) return false;
+        if (severity !== 'all' && r.severity !== severity) return false;
+        if (carrier !== 'all' && r.carrier !== carrier) return false;
+        if (query) {
+          if (!r.waybillNumber.toLowerCase().includes(query) &&
+              !(r.address || '').toLowerCase().includes(query)) return false;
+        }
+        return true;
+      });
+  },
+
+  renderExportPreview() {
+    const filteredData = this.getExportFilteredData();
+
+    document.getElementById('exportTotalCount').textContent = this.state.waybills.length;
+    document.getElementById('exportFilteredCount').textContent = filteredData.length;
+
+    const tbody = document.getElementById('exportPreviewBody');
+    if (filteredData.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 40px; color: #9ca3af;">
+            没有符合筛选条件的数据
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const statusLabels = { pending: '待处理', processing: '处理中', completed: '已完成', unmarked: '未标记' };
+    const severityLabels = { high: '高风险', medium: '中风险', low: '低风险', normal: '正常' };
+
+    tbody.innerHTML = filteredData.map(r => `
+      <tr data-id="${r._id}">
+        <td style="color: #9ca3af; font-family: monospace;">
+          ${r.index}${r.isDuplicate ? `<br><span style="color:#dc2626;font-size:10px;">#${r.duplicateIndex}/${this.state.waybills.filter(x => x.waybillNumber === r.waybillNumber).length}</span>` : ''}
+        </td>
+        <td style="font-family: 'SF Mono', Consolas, monospace; font-size: 11px;">${r.waybillNumber}</td>
+        <td style="font-size: 11px;">${r.address || '-'}</td>
+        <td>${r.weight ? r.weight + 'kg' : '-'}</td>
+        <td style="font-size: 11px;">${r.carrierName}</td>
+        <td><span class="status-tag status-${r.status}">${statusLabels[r.status]}</span></td>
+        <td><span class="severity-tag severity-${r.severity}">${severityLabels[r.severity]}</span></td>
+        <td style="font-size: 11px; max-width: 200px; color: #2563eb;">${r.remark || '-'}</td>
+      </tr>
+    `).join('');
+  },
+
+  async exportFromPreview(format) {
+    const filteredData = this.getExportFilteredData();
+    if (filteredData.length === 0) {
+      this.showToast('没有符合条件的数据可导出', 'warning');
+      return;
+    }
+
+    const records = filteredData.map(r => ({
+      index: r.index,
+      waybillNumber: r.waybillNumber,
+      address: r.address,
+      weight: r.weight,
+      carrierName: r.carrierName,
+      timeRequirement: r.timeRequirement,
+      exceptionTypes: r.exceptionTypes,
+      messages: r.messages,
+      suggestions: r.suggestions,
+      status: r.status,
+      remark: r.remark,
+      updatedAt: r.updatedAt
+    }));
+
+    try {
+      await this.sendMessage({
+        action: 'exportData',
+        data: { records, format }
+      });
+      this.closeModal('exportPreviewModal');
+      this.showToast(`已导出 ${records.length} 条记录（${format.toUpperCase()}格式）`, 'success');
+    } catch (error) {
+      console.error('导出失败:', error);
+      this.showToast('导出失败', 'error');
+    }
+  },
+
   getSeverityLabel(type) {
     const labels = {
       address_incomplete: '地址不完整',
@@ -870,18 +1206,32 @@ const SidebarApp = {
       exceptionMap.set(key, e);
     });
 
-    const workOrderMap = new Map(
-      this.state.workOrders.map(w => [w._id || w.waybillNumber, w])
-    );
+    const workOrderMap = new Map();
+    this.state.workOrders.forEach(w => {
+      const key = w._id || w.id || w.waybillNumber;
+      workOrderMap.set(key, w);
+    });
 
     container.innerHTML = waybills.map((waybill, idx) => {
       const displayIdx = this.state.waybills.indexOf(waybill) + 1;
       const isDuplicate = waybillNumberCount[waybill.waybillNumber] > 1;
-      const exceptionKey = waybill._id || waybill.waybillNumber;
-      const exception = exceptionMap.get(exceptionKey) ||
-                        this.state.exceptions.find(e => e.waybillNumber === waybill.waybillNumber);
-      const workOrder = workOrderMap.get(exceptionKey) ||
-                        this.state.workOrders.find(w => w.waybillNumber === waybill.waybillNumber);
+      const matchKey = waybill._id || waybill.waybillNumber;
+
+      let exception = exceptionMap.get(matchKey);
+      if (!exception) {
+        exception = this.state.exceptions.find(e =>
+          (e._id && e._id === matchKey) ||
+          (!e._id && e.waybillNumber === waybill.waybillNumber)
+        );
+      }
+
+      let workOrder = workOrderMap.get(matchKey);
+      if (!workOrder) {
+        workOrder = this.state.workOrders.find(w =>
+          (w._id && w._id === matchKey) ||
+          (!w._id && w.waybillNumber === waybill.waybillNumber)
+        );
+      }
 
       let severity = 'normal';
       let exceptionTags = '';
@@ -1108,7 +1458,21 @@ const SidebarApp = {
       return;
     }
 
-    container.innerHTML = this.state.routeAnalysis.map(analysis => {
+    const getWaybillsForAnalysis = (analysis) => {
+      const cities = analysis.cities || (analysis.city ? [analysis.city] : []);
+      const areas = analysis.area ? [analysis.area] : [];
+
+      return this.state.workOrders.filter(wo => {
+        const cityMatch = cities.length === 0 || cities.some(c => wo.address?.includes(c));
+        const areaMatch = areas.length === 0 || areas.some(a => wo.address?.includes(a));
+        if (analysis.waybills && analysis.waybills.length > 0) {
+          return analysis.waybills.includes(wo.waybillNumber);
+        }
+        return cityMatch || areaMatch;
+      });
+    };
+
+    container.innerHTML = this.state.routeAnalysis.map((analysis, analysisIdx) => {
       let cardClass = '';
       let iconText = '📍';
       let titleText = '路线分析';
@@ -1146,13 +1510,27 @@ const SidebarApp = {
           break;
       }
 
+      const relatedWorkOrders = getWaybillsForAnalysis(analysis);
+      const highRiskCount = relatedWorkOrders.filter(wo =>
+        wo.exceptions.some(e => e.severity === 'high')
+      ).length;
+      const mediumRiskCount = relatedWorkOrders.filter(wo =>
+        wo.exceptions.some(e => e.severity === 'medium') &&
+        !wo.exceptions.some(e => e.severity === 'high')
+      ).length;
+
       let waybillsHTML = '';
       if (analysis.waybills && analysis.waybills.length > 0) {
         waybillsHTML = `
           <div class="route-waybills">
-            ${analysis.waybills.slice(0, 5).map(w => `
-              <span class="route-waybill-tag">${w}</span>
-            `).join('')}
+            ${analysis.waybills.slice(0, 5).map(w => {
+              const hasHighRisk = relatedWorkOrders.some(wo =>
+                wo.waybillNumber === w && wo.exceptions.some(e => e.severity === 'high')
+              );
+              return `
+              <span class="route-waybill-tag ${hasHighRisk ? 'high-risk' : ''}">${w}</span>
+            `;
+            }).join('')}
             ${analysis.waybills.length > 5 ? `<span class="route-waybill-tag">+${analysis.waybills.length - 5}</span>` : ''}
           </div>
         `;
@@ -1164,8 +1542,26 @@ const SidebarApp = {
                         analysis.cities ? analysis.cities.join('、') :
                         analysis.city ? analysis.city : '';
 
+      let riskSummaryHTML = '';
+      if (relatedWorkOrders.length > 0 && this.state.workOrders.length > 0) {
+        riskSummaryHTML = `
+          <div class="route-risk-summary">
+            ${highRiskCount > 0 ? `<span class="risk-badge risk-high">🔴 高风险 ${highRiskCount}</span>` : ''}
+            ${mediumRiskCount > 0 ? `<span class="risk-badge risk-medium">🟠 中风险 ${mediumRiskCount}</span>` : ''}
+            <button class="btn btn-sm btn-primary route-jump-btn" data-idx="${analysisIdx}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              查看工单
+            </button>
+          </div>
+        `;
+      }
+
       return `
-        <div class="route-card ${cardClass}">
+        <div class="route-card ${cardClass}" data-idx="${analysisIdx}">
           <div class="route-header">
             <span class="route-title">
               ${iconText} ${titleText}
@@ -1177,9 +1573,47 @@ const SidebarApp = {
           <p class="route-message">${analysis.message}</p>
           <p class="route-suggestion">💡 ${analysis.suggestion}</p>
           ${waybillsHTML}
+          ${riskSummaryHTML}
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll('.route-jump-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.idx);
+        const analysis = this.state.routeAnalysis[idx];
+        if (analysis) {
+          const cities = analysis.cities || (analysis.city ? [analysis.city] : []);
+          const waybills = analysis.waybills || [];
+
+          if (waybills.length > 0) {
+            this.state.exceptionFilter = 'all';
+            document.getElementById('exceptionFilter').value = 'all';
+            this.switchTab('exception');
+
+            setTimeout(() => {
+              const firstMatch = this.state.workOrders.find(wo => waybills.includes(wo.waybillNumber));
+              if (firstMatch) {
+                const key = firstMatch._id || firstMatch.id || firstMatch.waybillNumber;
+                const card = document.querySelector(`.work-order-card[data-id="${CSS.escape(key)}"]`);
+                if (card) {
+                  card.classList.add('highlight');
+                  setTimeout(() => card.classList.remove('highlight'), 2000);
+                  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }
+              this.showToast(`已跳转至异常工单，共找到 ${this.state.workOrders.filter(wo => waybills.includes(wo.waybillNumber)).length} 个相关工单`, 'success');
+            }, 200);
+          } else if (cities.length > 0) {
+            this.state.exceptionFilter = 'all';
+            document.getElementById('exceptionFilter').value = 'all';
+            this.switchTab('exception');
+            this.showToast(`已跳转至异常工单`, 'success');
+          }
+        }
+      });
+    });
 
     document.getElementById('routeCount').textContent = this.state.routeAnalysis.length;
   },
@@ -1364,13 +1798,19 @@ const SidebarApp = {
       const woKey = wo._id || wo.id || wo.waybillNumber;
       const isDup = waybillNumberCount[wo.waybillNumber] > 1;
       const dupIndex = this.state.workOrders.filter(w => w.waybillNumber === wo.waybillNumber).indexOf(wo) + 1;
+      const isChecked = this.state.selectedWorkOrderIds.has(woKey);
 
       return `
-        <div class="work-order-card ${wo.status}">
+        <div class="work-order-card ${wo.status} ${isChecked ? 'selected' : ''}" data-id="${woKey}">
           <div class="work-order-header">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <span class="work-order-waybill">${wo.waybillNumber}</span>
-              ${isDup ? `<span class="work-order-dup">#${dupIndex}</span>` : ''}
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <label class="checkbox-wrapper" onclick="event.stopPropagation();">
+                <input type="checkbox" class="work-order-checkbox" data-id="${woKey}" ${isChecked ? 'checked' : ''}>
+              </label>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span class="work-order-waybill">${wo.waybillNumber}</span>
+                ${isDup ? `<span class="work-order-dup">#${dupIndex}</span>` : ''}
+              </div>
             </div>
             <span class="work-order-status status-${wo.status}">${this.getStatusLabel(wo.status)}</span>
           </div>
@@ -1422,6 +1862,21 @@ const SidebarApp = {
         this.updateWorkOrderStatus(id, 'completed');
       });
     });
+
+    container.querySelectorAll('.work-order-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const id = e.target.dataset.id;
+        if (e.target.checked) {
+          this.state.selectedWorkOrderIds.add(id);
+        } else {
+          this.state.selectedWorkOrderIds.delete(id);
+        }
+        this.updateBatchActionBar();
+      });
+    });
+
+    this.updateBatchActionBar();
 
     const pendingCount = this.state.workOrders.filter(w => w.status !== 'completed').length;
     document.getElementById('exceptionCount').textContent = pendingCount > 0 ? pendingCount : '';
