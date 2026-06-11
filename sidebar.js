@@ -11,6 +11,8 @@ const SidebarApp = {
     selectedWaybill: null,
     searchQuery: '',
     exceptionFilter: 'all',
+    workOrderStatusFilter: 'all',
+    workOrderSearch: '',
     selectedWorkOrderIds: new Set(),
     exportFilters: {
       status: 'all',
@@ -98,8 +100,38 @@ const SidebarApp = {
     document.getElementById('addTemplateBtn').addEventListener('click', () => this.openModal('templateModal'));
     document.getElementById('exceptionFilter').addEventListener('change', (e) => {
       this.state.exceptionFilter = e.target.value;
+      this.state.selectedWorkOrderIds.clear();
       this.renderWorkOrders();
     });
+    const workOrderStatusFilter = document.getElementById('workOrderStatusFilter');
+    if (workOrderStatusFilter) {
+      workOrderStatusFilter.addEventListener('change', (e) => {
+        this.state.workOrderStatusFilter = e.target.value;
+        this.state.selectedWorkOrderIds.clear();
+        this.renderWorkOrders();
+      });
+    }
+    const workOrderSearch = document.getElementById('workOrderSearch');
+    if (workOrderSearch) {
+      workOrderSearch.addEventListener('input', (e) => {
+        this.state.workOrderSearch = e.target.value;
+        this.state.selectedWorkOrderIds.clear();
+        this.renderWorkOrders();
+      });
+    }
+    const resetFilterBtn = document.getElementById('resetWorkOrderFilter');
+    if (resetFilterBtn) {
+      resetFilterBtn.addEventListener('click', () => {
+        this.state.exceptionFilter = 'all';
+        this.state.workOrderStatusFilter = 'all';
+        this.state.workOrderSearch = '';
+        document.getElementById('exceptionFilter').value = 'all';
+        document.getElementById('workOrderStatusFilter').value = 'all';
+        document.getElementById('workOrderSearch').value = '';
+        this.state.selectedWorkOrderIds.clear();
+        this.renderWorkOrders();
+      });
+    }
     document.getElementById('closeModal').addEventListener('click', () => this.closeModal('detailModal'));
     document.getElementById('closeTemplateModal').addEventListener('click', () => this.closeModal('templateModal'));
     document.getElementById('closeSettingsModal').addEventListener('click', () => this.closeModal('settingsModal'));
@@ -136,9 +168,19 @@ const SidebarApp = {
       }
     });
 
+    const updateExportFilter = () => {
+      this.state.exportFilters = {
+        status: document.getElementById('exportStatusFilter').value,
+        severity: document.getElementById('exportSeverityFilter').value,
+        carrier: document.getElementById('exportCarrierFilter').value,
+        search: document.getElementById('exportSearch').value
+      };
+      this.renderExportPreview();
+    };
     ['exportStatusFilter', 'exportSeverityFilter', 'exportCarrierFilter', 'exportSearch'].forEach(id => {
-      document.getElementById(id).addEventListener('change', () => this.renderExportPreview());
-      document.getElementById(id).addEventListener('input', () => this.renderExportPreview());
+      document.getElementById(id).addEventListener('change', updateExportFilter);
+      document.getElementById(id).addEventListener('input', updateExportFilter);
+      document.getElementById(id).addEventListener('keyup', updateExportFilter);
     });
     document.getElementById('exportCsvBtn').addEventListener('click', () => this.exportFromPreview('csv'));
     document.getElementById('exportJsonBtn').addEventListener('click', () => this.exportFromPreview('json'));
@@ -777,19 +819,33 @@ const SidebarApp = {
 
     const remarkInput = document.querySelector('.remark-input');
     const remark = remarkInput?.value.trim() || '';
-    const selectedId = this.state.selectedWaybill._id || this.state.selectedWaybill.waybillNumber;
+    const selectedWaybill = this.state.selectedWaybill;
+    const selectedId = selectedWaybill._id;
 
-    const workOrder = this.state.workOrders.find(
-      w => w._id === selectedId || w.waybillNumber === this.state.selectedWaybill.waybillNumber
-    );
+    let workOrder;
+    if (selectedId) {
+      workOrder = this.state.workOrders.find(w => w._id === selectedId);
+    }
+    if (!workOrder) {
+      workOrder = this.state.workOrders.find(
+        w => w.waybillNumber === selectedWaybill.waybillNumber && (!w._id || !selectedId)
+      );
+    }
     if (workOrder) {
       workOrder.remark = remark;
       workOrder.updatedAt = new Date().toISOString();
+      if (!workOrder._id && selectedId) workOrder._id = selectedId;
     }
 
-    const waybill = this.state.waybills.find(
-      w => w._id === selectedId || w.waybillNumber === this.state.selectedWaybill.waybillNumber
-    );
+    let waybill;
+    if (selectedId) {
+      waybill = this.state.waybills.find(w => w._id === selectedId);
+    }
+    if (!waybill) {
+      waybill = this.state.waybills.find(
+        w => w.waybillNumber === selectedWaybill.waybillNumber && (!w._id || !selectedId)
+      );
+    }
     if (waybill) {
       waybill.remark = remark;
       waybill.updatedAt = new Date().toISOString();
@@ -817,7 +873,9 @@ const SidebarApp = {
   },
 
   async updateWorkOrderStatus(id, status) {
-    const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
+    let workOrder = this.state.workOrders.find(w => w._id === id);
+    if (!workOrder) workOrder = this.state.workOrders.find(w => w.id === id);
+    if (!workOrder) workOrder = this.state.workOrders.find(w => w.waybillNumber === id && !w._id);
     if (workOrder) {
       workOrder.status = status;
       workOrder.updatedAt = new Date().toISOString();
@@ -851,8 +909,12 @@ const SidebarApp = {
     const bar = document.getElementById('batchActionsBar');
     if (!bar) return;
 
+    const visibleWorkOrders = this.getFilteredWorkOrders();
     const total = this.state.workOrders.length;
-    const selected = this.state.selectedWorkOrderIds.size;
+    const visibleCount = visibleWorkOrders.length;
+    const visibleKeys = new Set(visibleWorkOrders.map(wo => wo._id || wo.id || wo.waybillNumber));
+    let selectedVisible = 0;
+    this.state.selectedWorkOrderIds.forEach(id => { if (visibleKeys.has(id)) selectedVisible++; });
 
     if (total === 0) {
       bar.style.display = 'none';
@@ -860,13 +922,19 @@ const SidebarApp = {
     }
 
     bar.style.display = 'flex';
-    document.getElementById('selectedCount').textContent = selected;
+    document.getElementById('selectedCount').textContent = this.state.selectedWorkOrderIds.size;
     document.getElementById('totalWorkOrderCount').textContent = total;
+
+    const filterInfo = document.getElementById('workOrderFilterInfo');
+    if (filterInfo) {
+      filterInfo.style.display = (visibleCount < total) ? 'inline' : 'none';
+      filterInfo.textContent = visibleCount < total ? `（筛选出 ${visibleCount} 条）` : '';
+    }
 
     const selectAllCheckbox = document.getElementById('selectAllWorkOrders');
     if (selectAllCheckbox) {
-      selectAllCheckbox.checked = selected > 0 && selected === total;
-      selectAllCheckbox.indeterminate = selected > 0 && selected < total;
+      selectAllCheckbox.checked = selectedVisible > 0 && selectedVisible === visibleCount;
+      selectAllCheckbox.indeterminate = selectedVisible > 0 && selectedVisible < visibleCount;
     }
   },
 
@@ -890,6 +958,27 @@ const SidebarApp = {
         wo.exceptions.some(e => e.severity === this.state.exceptionFilter)
       );
     }
+    if (this.state.workOrderStatusFilter !== 'all') {
+      workOrders = workOrders.filter(wo => wo.status === this.state.workOrderStatusFilter);
+    }
+    if (this.state.workOrderSearch) {
+      const rawQ = this.state.workOrderSearch.trim();
+      const q = rawQ.toLowerCase();
+      const tokens = rawQ.split(/\s+/).filter(Boolean).map(t => t.toLowerCase());
+      workOrders = workOrders.filter(wo => {
+        const waybill = (wo.waybillNumber || '').toLowerCase();
+        const addr = (wo.address || '').toLowerCase();
+        const remark = (wo.remark || '').toLowerCase();
+        if (waybill.includes(q) || addr.includes(q) || remark.includes(q)) return true;
+        if (tokens.length >= 2) {
+          const city = this.extractCity(wo.address || '').toLowerCase();
+          return tokens.some(t =>
+            waybill.includes(t) || addr.includes(t) || remark.includes(t) || (city && city.includes(t))
+          );
+        }
+        return false;
+      });
+    }
     return workOrders;
   },
 
@@ -904,7 +993,9 @@ const SidebarApp = {
 
     let updatedCount = 0;
     this.state.selectedWorkOrderIds.forEach(id => {
-      const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
+      let workOrder = this.state.workOrders.find(w => w._id === id);
+      if (!workOrder) workOrder = this.state.workOrders.find(w => w.id === id);
+      if (!workOrder) workOrder = this.state.workOrders.find(w => w.waybillNumber === id && !w._id);
       if (workOrder) {
         workOrder.status = status;
         workOrder.updatedAt = new Date().toISOString();
@@ -967,13 +1058,23 @@ const SidebarApp = {
     const waybillsToUpdate = [];
 
     this.state.selectedWorkOrderIds.forEach(id => {
-      const workOrder = this.state.workOrders.find(w => w._id === id || w.id === id || w.waybillNumber === id);
+      let workOrder = this.state.workOrders.find(w => w._id === id);
+      if (!workOrder) workOrder = this.state.workOrders.find(w => w.id === id);
+      if (!workOrder) workOrder = this.state.workOrders.find(w => w.waybillNumber === id && !w._id);
       if (workOrder) {
         workOrder.remark = (workOrder.remark || '') + remarkToAppend;
         workOrder.updatedAt = new Date().toISOString();
         updatedCount++;
 
-        const waybill = this.state.waybills.find(w => w._id === id || w.waybillNumber === workOrder.waybillNumber);
+        let waybill;
+        if (workOrder._id) {
+          waybill = this.state.waybills.find(w => w._id === workOrder._id);
+        }
+        if (!waybill) {
+          waybill = this.state.waybills.find(
+            w => w.waybillNumber === workOrder.waybillNumber && (!w._id || !workOrder._id)
+          );
+        }
         if (waybill) {
           waybill.remark = workOrder.remark;
           waybillsToUpdate.push(waybill);
@@ -1038,8 +1139,13 @@ const SidebarApp = {
 
     return this.state.waybills
       .map((w, idx) => {
-        const workOrder = this.state.workOrders.find(wo => wo._id === w._id || wo.waybillNumber === w.waybillNumber);
-        const exception = this.state.exceptions.find(e => e._id === w._id || e.waybillNumber === w.waybillNumber);
+        let workOrder;
+        if (w._id) workOrder = this.state.workOrders.find(wo => wo._id === w._id);
+        if (!workOrder) workOrder = this.state.workOrders.find(wo => wo.waybillNumber === w.waybillNumber && (!wo._id || !w._id));
+
+        let exception;
+        if (w._id) exception = this.state.exceptions.find(e => e._id === w._id);
+        if (!exception) exception = this.state.exceptions.find(e => e.waybillNumber === w.waybillNumber && (!e._id || !w._id));
         const carrierInfo = this.state.settings?.carriers?.find(c => c.id === w.carrier);
         const isDup = this.state.waybills.filter(x => x.waybillNumber === w.waybillNumber).length > 1;
         const dupIndex = this.state.waybills.filter(x => x.waybillNumber === w.waybillNumber).indexOf(w) + 1;
@@ -1586,31 +1692,46 @@ const SidebarApp = {
         if (analysis) {
           const cities = analysis.cities || (analysis.city ? [analysis.city] : []);
           const waybills = analysis.waybills || [];
+          const relatedWaybillNumbers = [...new Set(waybills.filter(Boolean))];
 
-          if (waybills.length > 0) {
-            this.state.exceptionFilter = 'all';
-            document.getElementById('exceptionFilter').value = 'all';
-            this.switchTab('exception');
+          this.state.exceptionFilter = 'all';
+          document.getElementById('exceptionFilter').value = 'all';
+          this.state.workOrderStatusFilter = 'all';
+          document.getElementById('workOrderStatusFilter').value = 'all';
+          this.state.selectedWorkOrderIds.clear();
 
-            setTimeout(() => {
-              const firstMatch = this.state.workOrders.find(wo => waybills.includes(wo.waybillNumber));
-              if (firstMatch) {
-                const key = firstMatch._id || firstMatch.id || firstMatch.waybillNumber;
-                const card = document.querySelector(`.work-order-card[data-id="${CSS.escape(key)}"]`);
-                if (card) {
-                  card.classList.add('highlight');
-                  setTimeout(() => card.classList.remove('highlight'), 2000);
-                  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-              }
-              this.showToast(`已跳转至异常工单，共找到 ${this.state.workOrders.filter(wo => waybills.includes(wo.waybillNumber)).length} 个相关工单`, 'success');
-            }, 200);
+          let searchQuery = '';
+          if (relatedWaybillNumbers.length === 1) {
+            searchQuery = relatedWaybillNumbers[0];
+          } else if (relatedWaybillNumbers.length > 1 && relatedWaybillNumbers.length <= 3) {
+            searchQuery = relatedWaybillNumbers.join(' ');
           } else if (cities.length > 0) {
-            this.state.exceptionFilter = 'all';
-            document.getElementById('exceptionFilter').value = 'all';
-            this.switchTab('exception');
-            this.showToast(`已跳转至异常工单`, 'success');
+            searchQuery = cities[0];
           }
+          this.state.workOrderSearch = searchQuery;
+          document.getElementById('workOrderSearch').value = searchQuery;
+
+          this.switchTab('exception');
+
+          setTimeout(() => {
+            const filtered = this.getFilteredWorkOrders();
+            if (filtered.length > 0) {
+              const firstMatch = filtered[0];
+              const key = firstMatch._id || firstMatch.id || firstMatch.waybillNumber;
+              const card = document.querySelector(`.work-order-card[data-id="${CSS.escape(key)}"]`);
+              if (card) {
+                card.classList.add('highlight');
+                setTimeout(() => card.classList.remove('highlight'), 2500);
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+            const totalFound = filtered.length;
+            if (searchQuery) {
+              this.showToast(`已筛选相关工单 ${totalFound} 条（搜索：${searchQuery}）`, 'success');
+            } else {
+              this.showToast(`已跳转至异常工单`, 'success');
+            }
+          }, 220);
         }
       });
     });
@@ -1761,13 +1882,8 @@ const SidebarApp = {
 
   renderWorkOrders() {
     const container = document.getElementById('workOrderList');
-    let workOrders = [...this.state.workOrders];
-
-    if (this.state.exceptionFilter !== 'all') {
-      workOrders = workOrders.filter(wo =>
-        wo.exceptions.some(e => e.severity === this.state.exceptionFilter)
-      );
-    }
+    const allWorkOrders = [...this.state.workOrders];
+    let workOrders = this.getFilteredWorkOrders();
 
     if (workOrders.length === 0) {
       container.innerHTML = `

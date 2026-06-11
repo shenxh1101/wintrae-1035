@@ -268,13 +268,27 @@
         <div class="exception-work-order" id="exceptionWorkOrder">
           <div class="section-header">
             <h3>待处理异常工单</h3>
-            <div class="filter-bar">
+            <div class="filter-bar work-order-filter-bar">
               <select id="exceptionFilter">
                 <option value="all">全部异常</option>
                 <option value="high">高风险</option>
                 <option value="medium">中风险</option>
                 <option value="low">低风险</option>
               </select>
+              <select id="workOrderStatusFilter">
+                <option value="all">全部状态</option>
+                <option value="pending">待处理</option>
+                <option value="processing">处理中</option>
+                <option value="completed">已完成</option>
+              </select>
+              <input type="text" id="workOrderSearch" placeholder="搜索运单号、地址、城市..." class="work-order-search">
+              <button class="icon-btn btn-reset-filter" id="resetWorkOrderFilter" title="重置筛选">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -284,6 +298,7 @@
                 <input type="checkbox" id="selectAllWorkOrders">
                 <span>全选 (<span id="selectedCount">0</span>/<span id="totalWorkOrderCount">0</span>)</span>
               </label>
+              <em id="workOrderFilterInfo" style="display:none;font-style:normal;color:#0369a1;font-size:11px;"></em>
             </div>
             <div class="batch-right">
               <button class="btn btn-sm btn-secondary" id="batchProcessBtn">
